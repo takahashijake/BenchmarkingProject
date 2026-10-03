@@ -7,7 +7,8 @@ from types import MappingProxyType
 import pandas as pd
 from sklearn.datasets import load_breast_cancer
 
-from benchforge.core.config import TaskType
+from benchforge.core.config import DatasetSourceConfig, FileDatasetConfig, TaskType
+from benchforge.data.tabular import load_tabular_dataset
 
 
 @dataclass(frozen=True)
@@ -17,10 +18,31 @@ class Dataset:
     features: pd.DataFrame
     target: pd.Series
     feature_names: tuple[str, ...]
+    numeric_feature_names: tuple[str, ...]
+    categorical_feature_names: tuple[str, ...]
+    target_name: str
+    missing_values: dict[str, int]
+    target_labels: tuple[str, str]
 
     def __post_init__(self) -> None:
         if len(self.features) != len(self.target):
             raise ValueError("dataset features and target lengths differ")
+        if tuple(self.features.columns) != self.feature_names:
+            raise ValueError("dataset feature metadata does not match the feature frame")
+        if set(self.numeric_feature_names) & set(self.categorical_feature_names):
+            raise ValueError("numeric and categorical feature groups overlap")
+        if set(self.numeric_feature_names) | set(self.categorical_feature_names) != set(
+            self.feature_names
+        ):
+            raise ValueError("every feature must be classified as numeric or categorical")
+
+    @property
+    def row_count(self) -> int:
+        return len(self.features)
+
+    @property
+    def feature_count(self) -> int:
+        return len(self.feature_names)
 
 
 DatasetLoader = Callable[[], Dataset]
@@ -30,24 +52,35 @@ class DatasetRegistry:
     def __init__(self, loaders: dict[str, DatasetLoader]) -> None:
         self._loaders = MappingProxyType(dict(loaders))
 
-    def resolve(self, name: str) -> Dataset:
+    def resolve(self, config: str | DatasetSourceConfig) -> Dataset:
+        if isinstance(config, FileDatasetConfig):
+            return load_tabular_dataset(config)
+        name = config if isinstance(config, str) else config.name
         try:
             dataset = self._loaders[name]()
         except KeyError as exc:
             supported = ", ".join(sorted(self._loaders))
             raise ValueError(f"unsupported dataset '{name}'; available: {supported}") from exc
-        # Isolate each run from loader or caller mutation.
-        return Dataset(
-            identity=dataset.identity,
-            task=dataset.task,
-            features=dataset.features.copy(deep=True),
-            target=dataset.target.copy(deep=True),
-            feature_names=dataset.feature_names,
-        )
+        return _copy_dataset(dataset)
 
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(sorted(self._loaders))
+
+
+def _copy_dataset(dataset: Dataset) -> Dataset:
+    return Dataset(
+        identity=dataset.identity,
+        task=dataset.task,
+        features=dataset.features.copy(deep=True),
+        target=dataset.target.copy(deep=True),
+        feature_names=dataset.feature_names,
+        numeric_feature_names=dataset.numeric_feature_names,
+        categorical_feature_names=dataset.categorical_feature_names,
+        target_name=dataset.target_name,
+        missing_values=dict(dataset.missing_values),
+        target_labels=dataset.target_labels,
+    )
 
 
 def _load_breast_cancer() -> Dataset:
@@ -58,12 +91,18 @@ def _load_breast_cancer() -> Dataset:
     target_name = str(bunch.target.name)
     features = frame.drop(columns=[target_name])
     target = frame[target_name].astype(int)
+    feature_names = tuple(str(column) for column in features.columns)
     return Dataset(
         identity="sklearn:breast_cancer:v1",
         task=TaskType.BINARY_CLASSIFICATION,
         features=features,
         target=target,
-        feature_names=tuple(str(column) for column in features.columns),
+        feature_names=feature_names,
+        numeric_feature_names=feature_names,
+        categorical_feature_names=(),
+        target_name=target_name,
+        missing_values={name: int(features[name].isna().sum()) for name in feature_names},
+        target_labels=(str(bunch.target_names[0]), str(bunch.target_names[1])),
     )
 
 

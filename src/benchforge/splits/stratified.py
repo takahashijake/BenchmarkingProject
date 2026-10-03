@@ -16,6 +16,14 @@ class Fold:
 
 
 def build_stratified_folds(target: pd.Series, config: SplitConfig, seed: int) -> tuple[Fold, ...]:
+    class_counts = target.value_counts()
+    if len(class_counts) != 2:
+        raise ValueError("stratified binary cross-validation requires exactly two target classes")
+    if int(class_counts.min()) < config.n_splits:
+        raise ValueError(
+            f"each target class needs at least {config.n_splits} rows for "
+            "stratified cross-validation"
+        )
     splitter = StratifiedKFold(
         n_splits=config.n_splits,
         shuffle=config.shuffle,

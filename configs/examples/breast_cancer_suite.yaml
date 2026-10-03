@@ -1,0 +1,40 @@
+schema_version: 1
+task: binary_classification
+dataset:
+  name: breast_cancer
+split:
+  strategy: stratified_kfold
+  n_splits: 5
+  shuffle: true
+preprocessing:
+  median_imputation: true
+  standardize: true
+models:
+  - name: dummy_classifier
+    parameters:
+      strategy: prior
+  - name: logistic_regression
+    parameters:
+      C: 1.0
+      max_iter: 1000
+      solver: liblinear
+  - name: random_forest_classifier
+    parameters:
+      n_estimators: 100
+      max_depth: 8
+  - name: extra_trees_classifier
+    parameters:
+      n_estimators: 100
+      max_depth: 8
+  - name: hist_gradient_boosting_classifier
+    parameters:
+      max_iter: 100
+metrics:
+  - accuracy
+  - balanced_accuracy
+  - f1
+  - roc_auc
+primary_metric: roc_auc
+seed: 42
+output:
+  directory: artifacts

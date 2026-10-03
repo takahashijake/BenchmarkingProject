@@ -9,11 +9,11 @@ import numpy as np
 from sklearn.pipeline import Pipeline
 
 from benchforge.core.config import RunConfig
-from benchforge.data.registry import DatasetRegistry, default_dataset_registry
+from benchforge.data.registry import Dataset, DatasetRegistry, default_dataset_registry
 from benchforge.evaluation.metrics import AggregateMetric, aggregate_fold_metrics, compute_metrics
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.preprocessing.builder import build_preprocessor
-from benchforge.splits.stratified import build_stratified_folds
+from benchforge.splits.stratified import Fold, build_stratified_folds
 from benchforge.storage.local import LocalArtifactStore
 
 
@@ -69,26 +69,40 @@ def run_benchmark(
     dataset_registry: DatasetRegistry = default_dataset_registry,
     model_registry: ModelRegistry = default_model_registry,
     persist: bool = True,
+    dataset: Dataset | None = None,
+    folds: tuple[Fold, ...] | None = None,
 ) -> RunResult:
     random.seed(config.seed)
     np.random.seed(config.seed)
-    dataset = dataset_registry.resolve(config.dataset.name)
+    if dataset is None:
+        dataset = dataset_registry.resolve(config.dataset)
     if dataset.task != config.task:
         raise ValueError(
             f"dataset task '{dataset.task}' does not match configured task '{config.task}'"
         )
-    folds = build_stratified_folds(dataset.target, config.split, config.seed)
+    if folds is None:
+        folds = build_stratified_folds(dataset.target, config.split, config.seed)
+    if len(folds) != config.split.n_splits:
+        raise ValueError(
+            f"provided fold plan has {len(folds)} folds; expected {config.split.n_splits}"
+        )
     fold_results: list[FoldResult] = []
     predictions: list[PredictionRecord] = []
 
     for fold in folds:
         try:
             estimator = model_registry.create(config.model, config.seed)
+            capabilities = model_registry.capabilities(config.model.name)
             pipeline = Pipeline(
                 [
                     (
                         "preprocessing",
-                        build_preprocessor(config.preprocessing, dataset.feature_names),
+                        build_preprocessor(
+                            config.preprocessing,
+                            dataset.numeric_feature_names,
+                            dataset.categorical_feature_names,
+                            dense_output=capabilities.requires_dense,
+                        ),
                     ),
                     ("model", estimator),
                 ]

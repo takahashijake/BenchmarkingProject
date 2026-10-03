@@ -11,6 +11,7 @@ def test_example_configuration_parses() -> None:
     assert config.dataset.name == "breast_cancer"
     assert config.split.n_splits == 5
     assert len(config.fingerprint) == 64
+    assert config.fingerprint == "d41548be73cbb3b91126f9f4404b7d0fdaab128609c818958f7af65c17cfadf2"
 
 
 def test_fingerprint_is_canonical_and_ignores_output_location(example_config: RunConfig) -> None:

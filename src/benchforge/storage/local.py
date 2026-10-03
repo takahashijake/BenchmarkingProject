@@ -25,20 +25,31 @@ class LocalArtifactStore:
         timestamp = datetime.now(UTC)
         run_name = f"{timestamp.strftime('%Y%m%dT%H%M%S.%fZ')}_{result.fingerprint[:12]}"
         directory = self.root / run_name
+        return self.write_at(directory, config, result, created_at=timestamp)
+
+    def write_at(
+        self,
+        directory: Path,
+        config: RunConfig,
+        result: RunResult,
+        *,
+        created_at: datetime | None = None,
+        metadata_extra: dict[str, Any] | None = None,
+    ) -> Path:
+        timestamp = created_at or datetime.now(UTC)
         directory.mkdir(parents=True, exist_ok=False)
         self._write_json(directory / "config.json", config.canonical_dict())
-        self._write_json(
-            directory / "metadata.json",
-            {
-                "created_at": timestamp.isoformat(),
-                "benchforge_version": __version__,
-                "python_version": platform.python_version(),
-                "scikit_learn_version": sklearn.__version__,
-                "dataset_identity": result.dataset_identity,
-                "config_fingerprint": result.fingerprint,
-                "seed": result.seed,
-            },
-        )
+        metadata = {
+            "created_at": timestamp.isoformat(),
+            "benchforge_version": __version__,
+            "python_version": platform.python_version(),
+            "scikit_learn_version": sklearn.__version__,
+            "dataset_identity": result.dataset_identity,
+            "config_fingerprint": result.fingerprint,
+            "seed": result.seed,
+        }
+        metadata.update(metadata_extra or {})
+        self._write_json(directory / "metadata.json", metadata)
         self._write_json(
             directory / "fold_metrics.json",
             [asdict(fold) for fold in result.fold_results],

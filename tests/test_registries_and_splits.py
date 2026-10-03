@@ -1,6 +1,11 @@
 import numpy as np
 import pytest
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.dummy import DummyClassifier
+from sklearn.ensemble import (
+    ExtraTreesClassifier,
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+)
 from sklearn.linear_model import LogisticRegression
 
 from benchforge.core.config import ModelConfig, SplitConfig, TaskType
@@ -36,6 +41,21 @@ def test_model_registry_resolves_supported_models() -> None:
     assert isinstance(logistic, LogisticRegression)
     assert isinstance(forest, RandomForestClassifier)
     assert logistic.random_state == forest.random_state == 3
+    assert isinstance(
+        default_model_registry.create(ModelConfig(name="extra_trees_classifier"), seed=3),
+        ExtraTreesClassifier,
+    )
+    assert isinstance(
+        default_model_registry.create(
+            ModelConfig(name="hist_gradient_boosting_classifier"), seed=3
+        ),
+        HistGradientBoostingClassifier,
+    )
+    assert isinstance(
+        default_model_registry.create(ModelConfig(name="dummy_classifier"), seed=3),
+        DummyClassifier,
+    )
+    assert default_model_registry.capabilities("hist_gradient_boosting_classifier").requires_dense
 
 
 def test_model_registry_rejects_unsupported_model() -> None:
