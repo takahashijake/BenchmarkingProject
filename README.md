@@ -1,18 +1,18 @@
 # BenchForge
 
 BenchForge is reproducible benchmarking infrastructure for classical machine learning. It turns a
-declarative configuration into leakage-safe cross-validation evidence that can be inspected,
-compared, and reproduced later.
+strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
-BenchForge V0.2 supports two related workflows:
+BenchForge V0.3 has three workflow levels:
 
-- `benchforge run` executes one controlled model experiment.
-- `benchforge benchmark` compares several model families on one dataset using exactly the same
-  validation folds and produces a measured leaderboard.
-- Future AutoML will generate and search candidate pipelines using this same experiment kernel; it
-  is not implemented yet.
+- `benchforge run`: execute one concrete pipeline.
+- `benchforge benchmark`: compare several concrete pipelines on shared folds.
+- `benchforge search`: tune several model families under a finite budget and compare the tuning
+  procedures using untouched, shared outer folds.
 
-## Installation
+Future AutoML may orchestrate the search layer, but automatic pipeline invention is not V0.3.
+
+## Installation and examples
 
 BenchForge requires Python 3.12 or newer.
 
@@ -20,150 +20,164 @@ BenchForge requires Python 3.12 or newer.
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-```
 
-## Run the examples
-
-Run the original single-model experiment:
-
-```bash
 benchforge run configs/examples/breast_cancer_logreg.yaml
-```
-
-Compare five model families on the built-in offline dataset:
-
-```bash
 benchforge benchmark configs/examples/breast_cancer_suite.yaml
-```
-
-Run a mixed numerical/categorical user-file example:
-
-```bash
 benchforge benchmark configs/examples/mixed_tabular_suite.yaml
+benchforge search configs/examples/breast_cancer_search.yaml
+benchforge search configs/examples/mixed_tabular_search.yaml
 ```
 
-The Python API exposes `load_run_config()` / `run_benchmark()` and
-`load_benchmark_config()` / `run_benchmark_suite()` for programmatic execution.
+The Python API exposes `load_run_config()` / `run_benchmark()`,
+`load_benchmark_config()` / `run_benchmark_suite()`, and
+`load_search_config()` / `run_search()`.
 
-## User datasets
+## Search configuration
 
-CSV and Parquet sources are configured explicitly:
+Search uses its own strict `SearchConfig` instead of expanding `BenchmarkConfig`:
+
+```yaml
+schema_version: 1
+task: binary_classification
+dataset:
+  name: breast_cancer
+outer_split: {strategy: stratified_kfold, n_splits: 5, shuffle: true}
+inner_split: {strategy: stratified_kfold, n_splits: 3, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+models:
+  - {name: logistic_regression, id: logistic, mode: search}
+  - name: random_forest_classifier
+    id: forest
+    mode: search
+    parameters: {n_estimators: 200}
+  - {name: dummy_classifier, id: dummy, mode: fixed}
+metrics: [roc_auc, balanced_accuracy, f1]
+primary_metric: roc_auc
+budget:
+  trials_per_outer_fold: 20
+  # timeout_seconds_per_outer_fold: 600
+final_search: {enabled: true, trials: 40}
+seed: 42
+output: {directory: artifacts}
+```
+
+Every outer training partition receives its own inner Optuna search. BenchForge does not tune on
+the same held-out fold it uses to evaluate a tuned model. Inner preprocessing and selection see
+only outer-training rows; the outer validation partition stays untouched until parameters have
+been selected. All families share the same outer folds. The tuned leaderboard is ranked only by
+aggregate outer-fold primary-metric means, never by Optuna scores.
+
+`mode: fixed` evaluates a reference configuration directly on the shared outer folds without an
+inner-search cost. Candidate `parameters` are fixed overrides. A fixed parameter is removed from
+the curated search space; the search space is never allowed to overwrite it.
+
+The primary deterministic budget is `trials_per_outer_fold`. An optional timeout may stop a study
+earlier; when both are present, the first reached limit stops the study. Timeout is not an exact
+runtime budget. Search is sequential (`n_jobs=1`) and uses deterministic TPE, inner-fold, and
+estimator seeds derived with SHA-256.
+
+Nested evaluation is intentionally more expensive. A rough fit count is:
+
+```text
+outer folds × trials per outer fold × inner folds × searchable families
+```
+
+plus one outer refit per family/fold, fixed-baseline fits, and an optional final search. This is a
+compute explanation, not a wall-clock promise.
+
+After outer ranking, `final_search` can tune the top measured family on all available data. Its CV
+score is selection evidence for deployable hyperparameters, not unbiased held-out performance. It
+cannot change the already-computed nested leaderboard.
+
+## Data and leakage-safe preprocessing
+
+BenchForge includes the sklearn Breast Cancer Wisconsin dataset and reads local CSV or Parquet:
 
 ```yaml
 dataset:
-  source: csv                 # csv or parquet
+  source: csv
   path: data/customers.csv
   target_column: subscribed
-  id_columns: [customer_id]   # excluded from features
+  id_columns: [customer_id]
   task: binary_classification
   categorical_cardinality_limit: 100
   allow_high_cardinality: false
 ```
 
-Files are read locally; no network is required. BenchForge rejects missing files, missing target or
-ID columns, duplicate columns, missing targets, non-binary targets, empty feature sets, unsupported
-dtypes, and categorical columns above the configured cardinality limit. Set
-`allow_high_cardinality: true` only after deciding one-hot expansion is appropriate.
-Relative input paths are resolved from the process working directory, so repository examples are
-intended to be run from the repository root.
+Files are content-addressed. BenchForge validates paths, columns, binary targets, dtypes, feature
+availability, and categorical cardinality. Numeric columns use optional median imputation and
+standardization. Categorical columns use most-frequent imputation and one-hot encoding with unknown
+category handling. A fresh sklearn pipeline is fitted inside every inner or ordinary training fold;
+learned preprocessing state is never shared across folds.
 
-Numeric pandas dtypes are numerical. Boolean, string, object, and pandas categorical dtypes are
-categorical; booleans are intentionally one-hot encoded. Datetime and arbitrary unsupported dtypes
-are rejected. String binary labels are encoded deterministically in sorted order, and the original
-label order is recorded in the dataset summary. Free-form text modeling is outside V0.2.
+## Models, metrics, and search spaces
 
-## Leakage-safe mixed preprocessing
+Supported classifiers are Logistic Regression, Random Forest, Extra Trees, Histogram Gradient
+Boosting, and DummyClassifier. Supported metrics are accuracy, balanced accuracy, F1, and ROC-AUC.
+Metric metadata records optimization direction; all current metrics are higher-is-better.
 
-Every fold receives a new sklearn `Pipeline` and `ColumnTransformer`. Numeric columns use optional
-median imputation and standardization. Categorical columns use most-frequent imputation and
-one-hot encoding with `handle_unknown="ignore"`, so validation-only categories do not fail.
+Versioned curated search spaces cover:
 
-All imputer, scaler, and encoder state is learned exclusively from training-fold rows. No learned
-transformation is fitted to the complete dataset. Histogram gradient boosting declares a dense
-input requirement through model metadata; other models may retain sparse one-hot output.
+- Logistic Regression: log-scaled `C`, compatible penalty, and class weight.
+- Random Forest and Extra Trees: estimator count, depth, split/leaf sizes, feature sampling, and
+  class weight.
+- Histogram Gradient Boosting: learning rate, iterations, leaves, leaf size, L2, and depth.
 
-## Models and metrics
+DummyClassifier is a fixed baseline and has no search space. Tree estimators default to `n_jobs=1`.
 
-Supported classifiers:
+## Failure and ranking semantics
 
-- Logistic Regression
-- Random Forest
-- Extra Trees
-- Histogram Gradient Boosting
-- Dummy Classifier baseline
+Trial failures retain state, full/proposed parameters, exception type/message, and duration. A bad
+trial does not end a study. If no trial completes for a family/fold, that family is surfaced as a
+failure and other families continue. If every family fails, the command fails clearly.
 
-Supported metrics are accuracy, balanced accuracy, F1, and ROC-AUC. All currently have a
-higher-is-better direction. Estimator randomness comes from the benchmark seed, and parallel tree
-defaults are conservative (`n_jobs=1`).
-
-## Fair comparison and leaderboard
-
-The suite runner resolves and validates the dataset once, creates one deterministic stratified fold
-plan, and passes that immutable plan to the existing single-experiment kernel for every candidate.
-This paired evaluation makes model scores comparable on the same held-out samples.
-
-Successful candidates are ranked by descending mean primary metric, with deterministic model-ID
-tie-breaking. The leaderboard includes mean, population standard deviation, all requested metrics,
-runtime, and status. Failed candidates remain visible but receive no rank. Output describes the
-leader as the highest measured mean in this benchmark; it does not claim statistical superiority.
+The tuned-family leaderboard includes fixed baselines and aggregates only outer-fold results. It
+reports the “top measured tuned family” or “highest measured nested-CV mean”; it does not claim
+statistical significance.
 
 ## Artifacts and reproducibility
 
-Single experiments retain the V0 JSON/CSV artifact format. A suite creates:
+Single-run and fixed-benchmark artifact formats remain compatible with V0/V0.2. Search writes:
 
 ```text
-artifacts/benchmark_<UTC timestamp>_<fingerprint>/
-├── benchmark_config.json
+artifacts/search_<UTC timestamp>_<fingerprint>/
+├── search_config.json
 ├── metadata.json
 ├── dataset_summary.json
-├── leaderboard.json
-├── leaderboard.csv
+├── outer_folds.json
+├── tuned_leaderboard.json
+├── tuned_leaderboard.csv
 ├── failures.json
-└── runs/
-    └── <model identifier>/
-        ├── config.json
-        ├── metadata.json
-        ├── fold_metrics.json
-        ├── aggregate_metrics.json
-        └── predictions.csv
+├── final_candidate.json
+└── families/<identifier>/
+    ├── summary.json
+    ├── outer_predictions.csv
+    └── outer_fold_<n>/
+        ├── split_plan.json
+        ├── trials.json
+        ├── trials.csv
+        ├── best_params.json
+        └── outer_result.json
 ```
 
-The suite fingerprint covers normalized benchmark semantics and the resolved dataset identity. User
-files are content-addressed with SHA-256, so changing file contents changes suite identity; moving an
-identical input file does not. Model order, timestamps, output paths, machine paths, and measured
-runtimes are excluded. Model execution order therefore does not change suite identity.
-
-Exact runtime is naturally machine-dependent. With the same data content, configuration,
-BenchForge/dependency versions, and seed, fold assignments, predictions, metrics, ranking, and
-fingerprint are expected to be materially identical.
+The search fingerprint includes resolved dataset identity, candidates/fixed parameters, versioned
+search-space definitions, both split configurations, preprocessing, metrics, primary metric,
+budgets, seed, and final-search settings. It excludes timestamps, runtimes, artifact location, and
+a file path when content identity already captures the data. With fixed data content,
+configuration, BenchForge/dependency versions, and seed, sequential proposal sequences, folds,
+selected parameters, predictions, metrics, ranking, and fingerprint should be materially
+equivalent. Runtime fields are intentionally excluded from deterministic comparisons.
 
 See [the architecture document](docs/architecture.md) for dependency boundaries.
 
-## Current limitations
+## Current limitations and roadmap
 
-BenchForge V0.2 is single-process and supports binary classification with stratified K-fold only.
-It does **not** implement regression, hyperparameter optimization, an AutoML controller, XGBoost,
-LightGBM, CatBoost, text modeling, robustness sweeps, statistical significance testing, distributed
-execution, an experiment database, or a web UI.
+V0.3 search is single-process and supports binary classification with stratified K-fold only. It
+does not implement regression, pruning, multi-objective search, arbitrary pipelines,
+feature-selection search, full AutoML, XGBoost, LightGBM, CatBoost, neural networks, GPUs,
+distributed workers, robustness suites, statistical significance testing, a persistent analytics
+catalog, model deployment, or a web UI.
 
-## Roadmap
-
-**NOW**
-
-- user-supplied mixed tabular datasets
-- shared-fold multi-model benchmark suites
-- reproducible leaderboards and suite evidence
-
-**NEXT**
-
-- richer schemas and regression
-- persistent experiment/run catalog
-- budgeted hyperparameter optimization
-- statistical model comparison
-
-**LATER**
-
-- AutoML controller
-- robustness suites
-- parallel/distributed execution
-- richer reporting and UI
+The suggested next major slice is regression support: lower-is-better metric specifications,
+regression models, compatible split planning, and versioned regression search spaces. A broader
+AutoML controller should remain above—not inside—the reusable search layer.

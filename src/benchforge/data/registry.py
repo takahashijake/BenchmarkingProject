@@ -45,6 +45,18 @@ class Dataset:
         return len(self.feature_names)
 
 
+@dataclass(frozen=True)
+class DatasetSummary:
+    identity: str
+    row_count: int
+    feature_count: int
+    numeric_features: tuple[str, ...]
+    categorical_features: tuple[str, ...]
+    target_name: str
+    target_labels: tuple[str, str]
+    missing_values: dict[str, int]
+
+
 DatasetLoader = Callable[[], Dataset]
 
 

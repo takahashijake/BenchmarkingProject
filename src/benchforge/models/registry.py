@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from sklearn import __version__ as sklearn_version
 from sklearn.base import ClassifierMixin
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import (
@@ -31,6 +32,13 @@ class ModelSpec:
 
 
 def _logistic_regression(parameters: dict[str, Any], seed: int) -> ClassifierMixin:
+    # sklearn 1.8 replaced the deprecated penalty selector with l1_ratio. Keep the
+    # BenchForge model contract stable across supported sklearn releases.
+    version = tuple(int(part) for part in sklearn_version.split(".")[:2])
+    penalty = parameters.get("penalty")
+    if version >= (1, 8) and penalty in {"l1", "l2"}:
+        parameters.pop("penalty")
+        parameters.setdefault("l1_ratio", 1.0 if penalty == "l1" else 0.0)
     return LogisticRegression(random_state=seed, **parameters)
 
 

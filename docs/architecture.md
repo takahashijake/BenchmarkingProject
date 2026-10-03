@@ -1,79 +1,98 @@
-# BenchForge V0.2 architecture
+# BenchForge V0.3 architecture
 
-BenchForge separates one atomic experiment from orchestration across candidates:
+BenchForge separates atomic execution, fixed comparison, and search orchestration:
 
 ```text
 CLI
-├── run ────────────────────────────────┐
-└── benchmark -> BenchmarkRunner        │
-                 ├── resolve dataset once
-                 ├── infer schema once │
-                 ├── create folds once │
-                 └── for each model ───┤
-                                       v
-                              experiment kernel
-                              ├── fresh preprocessor
-                              ├── fresh estimator
-                              ├── fit training fold only
-                              ├── evaluate validation fold
-                              └── return fold evidence
+├── run ─────────────────────────────────────────┐
+├── benchmark -> fixed candidate orchestration ──┤
+└── search -> nested-search orchestration         │
+             ├── one shared outer fold plan      │
+             ├── inner Optuna studies ───────────┤
+             ├── selected outer refits ──────────┤
+             └── optional final full-data search │
+                                                 v
+                                      experiment kernel
+                                      ├── fresh preprocessor
+                                      ├── fresh estimator
+                                      ├── fit training rows only
+                                      ├── evaluate validation rows
+                                      └── return fold evidence
 ```
 
-`run_benchmark()` remains the atomic execution unit. It can resolve its own dataset and folds, which
-preserves the V0 API, or accept a resolved `Dataset` and immutable `Fold` tuple. The suite layer uses
-the latter path. Training, prediction, scoring, and aggregation therefore have one implementation;
-future search and AutoML can reuse the same kernel.
+`run_benchmark()` remains the atomic CV execution unit and retains the V0 API. It may resolve its
+own data/folds or accept a resolved `Dataset` and immutable fold tuple. Its extracted
+`execute_fold()` operation performs the one final outer evaluation for a selected configuration.
+Preprocessing, estimator construction, prediction, and scoring have one implementation.
 
 ## Dependency boundaries
 
-- `core` owns strict configuration and semantic serialization.
-- `data` owns built-in and local-file loading, validation, schema inference, and dataset identity.
-- `splits` owns deterministic fold plans.
-- `preprocessing` builds fold-local sklearn transformers.
-- `models` owns factories and minimal input-capability metadata.
-- `evaluation` owns metrics and aggregation.
-- `execution.runner` is the atomic single-model CV kernel.
-- `execution.benchmark` owns multi-candidate orchestration, failures, timing, and ranking.
-- `storage` persists single-run and suite artifacts.
-- `analysis` formats completed results; the CLI contains no benchmark logic.
+- `core` owns strict run, benchmark, and search configurations and semantic serialization.
+- `data` owns built-in/file loading, validation, schema inference, and content identity.
+- `splits` owns deterministic flat and nested fold plans in original dataset index space.
+- `preprocessing` builds fresh fold-local sklearn transformers.
+- `models` owns estimator factories and minimal dense-input capability metadata.
+- `evaluation` owns metrics, optimization direction, and fold aggregation.
+- `execution.runner` is the atomic CV/fold kernel.
+- `execution.benchmark` owns fixed multi-candidate orchestration.
+- `search.spaces` and `search.registry` own versioned Optuna proposal semantics independently of
+  the estimator registry.
+- `search.runner` owns nested search, sequential studies, failures, outer aggregation, and final
+  selection.
+- `search.results` owns explicit immutable evidence types.
+- `storage` persists run, suite, and nested-search evidence.
+- `analysis` formats results; the CLI contains no execution logic.
 
-Registries are immutable instance-local mappings rather than mutable process globals. Dataset frames
-are copied at registry boundaries and are not mutated during candidate execution.
+Registries are immutable instance-local mappings. Dataset frames are copied at registry boundaries
+and are not mutated during execution.
 
-## Why shared folds matter
+## Nested leakage boundary
 
-Different random partitions can make a model look better simply because it received easier held-out
-rows. A benchmark suite resolves the target once and constructs one seeded stratified split plan.
-Every model receives the exact same train/validation index arrays. Out-of-fold records preserve the
-sample index and fold ID, making the pairing auditable.
+The outer fold plan is created exactly once and shared by every family. For each outer fold,
+`build_inner_folds()` splits only its training indices and maps relative split indices back to the
+original dataset index space. Optuna objectives receive only these inner folds. Every inner fold
+fits a new preprocessing pipeline on inner-training rows.
 
-## Leakage boundary
+Outer-validation indices are recorded for audit but passed only to the post-selection
+`execute_fold()` call. They cannot affect proposal, pruning (not implemented), preprocessing,
+objective scores, or parameter selection. Sentinel regression tests structurally prove that no
+outer-validation sample enters inner training or validation.
 
-For each model and fold, the experiment kernel constructs a new sklearn `Pipeline` containing a new
-`ColumnTransformer` and estimator. Numeric imputation/scaling and categorical imputation/one-hot
-vocabularies are fitted only by `pipeline.fit(train_x, train_y)`. Validation data is transformed only
-after fitting. Tests explicitly verify that held-out numerical extremes and held-out categories do
-not influence learned preprocessing state.
+The tuned-family leaderboard aggregates the exactly-once outer results. Inner objective scores
+select parameters only. The optional final full-data score selects deployment parameters only.
+Neither can rank families.
 
-## Model capabilities
+## Search spaces, budgets, and failures
 
-`ModelSpec` pairs a factory with a deliberately small `ModelCapabilities` value. V0.2 uses only
-`requires_dense`; preprocessing chooses dense or sparse one-hot output before the pipeline is built.
-This keeps estimator-specific conversion out of the execution loop without creating a speculative
-capability framework.
+`SearchSpaceRegistry` is keyed compatibly with `ModelRegistry`, while keeping proposal policy out of
+model construction and orchestration. Every space has an explicit version and serializable
+definition. User-fixed parameter names are omitted from proposals and merged without overwrite.
+
+Each family/outer-fold study uses seeded TPE, sequential trials, and a deterministic estimator
+seed. Trial count is the primary budget; optional timeout is a best-effort second stopping limit.
+Expected parameter/value or numerical fold failures are recoverable trial failures; unexpected
+exception types are not converted into objective scores. A fold with no completed trial fails its
+family visibly, while unrelated families remain isolated.
 
 ## Identity and persistence
 
-Single-run fingerprints retain V0 canonicalization. Suite fingerprints hash canonical suite
-semantics plus resolved dataset identity. Model entries are sorted during fingerprinting because
-execution order is not semantic. For file datasets, the content SHA-256 is semantic while the input
-path is not. Output directory, timestamps, runtime, and machine-specific locations are excluded.
+Search fingerprints hash canonical search semantics, resolved dataset content identity, and the
+participating versioned search-space definitions. Output paths, source paths already replaced by
+content identity, timestamps, durations, and machine locations are excluded.
 
-The suite artifact root contains normalized configuration, provenance, dataset schema/missingness,
-JSON and CSV leaderboards, structured failures, and nested V0-compatible artifacts for every
-successful candidate. This shape is intended to be directly ingestible by a future run catalog.
+Per-family/per-fold seeds use SHA-256 derivation instead of Python's randomized `hash()`. For fixed
+data, configuration, versions, and seed, sequential TPE makes folds, proposals, selected
+parameters, predictions, metrics, ranking, and semantic identity materially reproducible. Runtime
+and timestamp fields are not deterministic.
 
-## Deliberately not implemented
+Artifacts preserve shared outer folds, every nested split plan, complete/failed/pruned trial
+records, selected inner parameters/scores, outer metrics and predictions, aggregate family
+evidence, and optional final selection. JSON/CSV is sufficient for V0.3; no Optuna database is
+required.
 
-Hyperparameter optimization, AutoML policy, regression, XGBoost, LightGBM, CatBoost, robustness
-sweeps, distributed execution, statistical significance claims, and web UI remain future work.
+## Deliberately deferred
+
+Regression, pruning, multi-objective optimization, arbitrary pipeline generation, feature search,
+full AutoML policy, XGBoost, LightGBM, CatBoost, neural networks, GPU/distributed scheduling,
+robustness suites, statistical significance, deployment, persistent analytics, and web UI remain
+future work.

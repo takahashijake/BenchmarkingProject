@@ -1,0 +1,36 @@
+schema_version: 1
+task: binary_classification
+dataset:
+  source: csv
+  path: configs/examples/data/mixed_customers.csv
+  target_column: subscribed
+  id_columns: [customer_id]
+  task: binary_classification
+  categorical_cardinality_limit: 20
+outer_split:
+  strategy: stratified_kfold
+  n_splits: 2
+  shuffle: true
+inner_split:
+  strategy: stratified_kfold
+  n_splits: 2
+  shuffle: true
+preprocessing:
+  median_imputation: true
+  standardize: true
+models:
+  - name: logistic_regression
+    id: logistic
+    mode: search
+  - name: dummy_classifier
+    id: dummy
+    mode: fixed
+metrics: [balanced_accuracy, f1, roc_auc]
+primary_metric: balanced_accuracy
+budget:
+  trials_per_outer_fold: 2
+final_search:
+  enabled: false
+seed: 17
+output:
+  directory: artifacts

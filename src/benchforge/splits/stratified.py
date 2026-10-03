@@ -35,3 +35,24 @@ def build_stratified_folds(target: pd.Series, config: SplitConfig, seed: int) ->
         validation.setflags(write=False)
         folds.append(Fold(fold_id, train, validation))
     return tuple(folds)
+
+
+def build_inner_folds(
+    target: pd.Series,
+    outer_fold: Fold,
+    config: SplitConfig,
+    seed: int,
+) -> tuple[Fold, ...]:
+    """Build inner folds in global index space, strictly inside an outer training set."""
+    outer_train = outer_fold.train_indices
+    relative_folds = build_stratified_folds(
+        target.iloc[outer_train].reset_index(drop=True), config, seed
+    )
+    folds: list[Fold] = []
+    for relative in relative_folds:
+        train = np.asarray(outer_train[relative.train_indices], dtype=np.int64)
+        validation = np.asarray(outer_train[relative.validation_indices], dtype=np.int64)
+        train.setflags(write=False)
+        validation.setflags(write=False)
+        folds.append(Fold(relative.fold_id, train, validation))
+    return tuple(folds)

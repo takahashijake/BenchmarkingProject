@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "benchforge"
-version = "0.2.0"
+version = "0.3.0"
 description = "Reproducible benchmarking for classical machine learning"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 dependencies = [
   "numpy>=1.26",
+  "optuna>=4.0",
   "pandas>=2.1",
   "pyarrow>=15.0",
   "pydantic>=2.7",

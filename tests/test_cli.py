@@ -59,3 +59,34 @@ def test_cli_reports_invalid_benchmark_configuration(
     error = capsys.readouterr().err
     assert "benchforge: error:" in error
     assert "at least one model is required" in error
+
+
+def test_cli_runs_nested_search(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    data = yaml.safe_load(
+        Path("configs/examples/breast_cancer_search.yaml").read_text(encoding="utf-8")
+    )
+    data["models"] = [data["models"][0], data["models"][-1]]
+    data["final_search"]["enabled"] = False
+    data["output"]["directory"] = str(tmp_path / "artifacts")
+    config_path = tmp_path / "search.yaml"
+    config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    assert main(["search", str(config_path)]) == 0
+    output = capsys.readouterr().out
+    assert "BenchForge nested search complete" in output
+    assert "outer-fold held-out means only" in output
+    assert "Top measured tuned family:" in output
+
+
+def test_cli_reports_invalid_search_configuration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = yaml.safe_load(
+        Path("configs/examples/breast_cancer_search.yaml").read_text(encoding="utf-8")
+    )
+    data["models"] = []
+    config_path = tmp_path / "invalid-search.yaml"
+    config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    assert main(["search", str(config_path)]) == 2
+    error = capsys.readouterr().err
+    assert "benchforge: error:" in error
+    assert "at least one search candidate is required" in error

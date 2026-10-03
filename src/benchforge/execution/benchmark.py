@@ -5,24 +5,17 @@ from pathlib import Path
 from time import perf_counter
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
-from benchforge.data.registry import Dataset, DatasetRegistry, default_dataset_registry
+from benchforge.data.registry import (
+    Dataset,
+    DatasetRegistry,
+    DatasetSummary,
+    default_dataset_registry,
+)
 from benchforge.evaluation.metrics import AggregateMetric
 from benchforge.execution.runner import RunResult, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.splits.stratified import build_stratified_folds
 from benchforge.storage.suite import BenchmarkArtifactStore
-
-
-@dataclass(frozen=True)
-class DatasetSummary:
-    identity: str
-    row_count: int
-    feature_count: int
-    numeric_features: tuple[str, ...]
-    categorical_features: tuple[str, ...]
-    target_name: str
-    target_labels: tuple[str, str]
-    missing_values: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -66,7 +59,7 @@ class BenchmarkResult:
     artifact_directory: Path | None = None
 
 
-def _summarize_dataset(dataset: Dataset) -> DatasetSummary:
+def summarize_dataset(dataset: Dataset) -> DatasetSummary:
     return DatasetSummary(
         identity=dataset.identity,
         row_count=dataset.row_count,
@@ -170,7 +163,7 @@ def run_benchmark_suite(
     primary_metric = config.primary_metric.value
     result = BenchmarkResult(
         fingerprint=config.fingerprint_for_dataset(dataset.identity),
-        dataset=_summarize_dataset(dataset),
+        dataset=summarize_dataset(dataset),
         primary_metric=primary_metric,
         fold_count=len(folds),
         candidates=tuple(candidates),

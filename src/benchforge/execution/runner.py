@@ -63,6 +63,61 @@ def _prediction_score(pipeline: Pipeline, features: Any) -> np.ndarray[Any, Any]
     return None
 
 
+def execute_fold(
+    config: RunConfig,
+    dataset: Dataset,
+    fold: Fold,
+    *,
+    model_registry: ModelRegistry = default_model_registry,
+) -> tuple[FoldResult, tuple[PredictionRecord, ...]]:
+    """Execute one immutable fold using the same kernel as a normal run."""
+    try:
+        estimator = model_registry.create(config.model, config.seed)
+        capabilities = model_registry.capabilities(config.model.name)
+        pipeline = Pipeline(
+            [
+                (
+                    "preprocessing",
+                    build_preprocessor(
+                        config.preprocessing,
+                        dataset.numeric_feature_names,
+                        dataset.categorical_feature_names,
+                        dense_output=capabilities.requires_dense,
+                    ),
+                ),
+                ("model", estimator),
+            ]
+        )
+        train_x = dataset.features.iloc[fold.train_indices]
+        train_y = dataset.target.iloc[fold.train_indices]
+        validation_x = dataset.features.iloc[fold.validation_indices]
+        validation_y = dataset.target.iloc[fold.validation_indices]
+        pipeline.fit(train_x, train_y)
+        predicted = np.asarray(pipeline.predict(validation_x), dtype=np.int64)
+        score = _prediction_score(pipeline, validation_x)
+        truth = validation_y.to_numpy(dtype=np.int64)
+        metrics = compute_metrics(config.metrics, truth, predicted, score)
+        fold_result = FoldResult(fold.fold_id, len(train_x), len(validation_x), metrics)
+        predictions = tuple(
+            PredictionRecord(
+                sample_index=int(sample_index),
+                fold_id=fold.fold_id,
+                truth=int(actual),
+                prediction=int(estimate),
+                score=None if score is None else float(score[position]),
+            )
+            for position, (sample_index, actual, estimate) in enumerate(
+                zip(validation_y.index, truth, predicted, strict=True)
+            )
+        )
+        return fold_result, predictions
+    except Exception as exc:
+        raise FoldExecutionError(
+            f"fold {fold.fold_id} failed for dataset '{dataset.identity}', "
+            f"model '{config.model.name}', fingerprint '{config.fingerprint[:12]}': {exc}"
+        ) from exc
+
+
 def run_benchmark(
     config: RunConfig,
     *,
@@ -90,50 +145,11 @@ def run_benchmark(
     predictions: list[PredictionRecord] = []
 
     for fold in folds:
-        try:
-            estimator = model_registry.create(config.model, config.seed)
-            capabilities = model_registry.capabilities(config.model.name)
-            pipeline = Pipeline(
-                [
-                    (
-                        "preprocessing",
-                        build_preprocessor(
-                            config.preprocessing,
-                            dataset.numeric_feature_names,
-                            dataset.categorical_feature_names,
-                            dense_output=capabilities.requires_dense,
-                        ),
-                    ),
-                    ("model", estimator),
-                ]
-            )
-            train_x = dataset.features.iloc[fold.train_indices]
-            train_y = dataset.target.iloc[fold.train_indices]
-            validation_x = dataset.features.iloc[fold.validation_indices]
-            validation_y = dataset.target.iloc[fold.validation_indices]
-            pipeline.fit(train_x, train_y)
-            predicted = np.asarray(pipeline.predict(validation_x), dtype=np.int64)
-            score = _prediction_score(pipeline, validation_x)
-            truth = validation_y.to_numpy(dtype=np.int64)
-            metrics = compute_metrics(config.metrics, truth, predicted, score)
-            fold_results.append(FoldResult(fold.fold_id, len(train_x), len(validation_x), metrics))
-            predictions.extend(
-                PredictionRecord(
-                    sample_index=int(sample_index),
-                    fold_id=fold.fold_id,
-                    truth=int(actual),
-                    prediction=int(estimate),
-                    score=None if score is None else float(score[position]),
-                )
-                for position, (sample_index, actual, estimate) in enumerate(
-                    zip(validation_y.index, truth, predicted, strict=True)
-                )
-            )
-        except Exception as exc:
-            raise FoldExecutionError(
-                f"fold {fold.fold_id} failed for dataset '{dataset.identity}', "
-                f"model '{config.model.name}', fingerprint '{config.fingerprint[:12]}': {exc}"
-            ) from exc
+        fold_result, fold_predictions = execute_fold(
+            config, dataset, fold, model_registry=model_registry
+        )
+        fold_results.append(fold_result)
+        predictions.extend(fold_predictions)
 
     result = RunResult(
         fingerprint=config.fingerprint,

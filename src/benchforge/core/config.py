@@ -255,3 +255,125 @@ def load_benchmark_config(path: str | Path) -> BenchmarkConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"configuration {config_path} must contain a YAML mapping")
     return BenchmarkConfig.model_validate(raw)
+
+
+class SearchModelConfig(ModelConfig):
+    mode: Literal["search", "fixed"] = "search"
+
+
+class SearchBudget(StrictModel):
+    trials_per_outer_fold: int = Field(ge=1)
+    timeout_seconds_per_outer_fold: float | None = Field(default=None, gt=0)
+
+
+class FinalSearchConfig(StrictModel):
+    enabled: bool = False
+    trials: int = Field(default=20, ge=1)
+    timeout_seconds: float | None = Field(default=None, gt=0)
+
+
+class SearchConfig(StrictModel):
+    schema_version: Literal[1] = 1
+    task: TaskType
+    dataset: DatasetSourceConfig
+    outer_split: SplitConfig
+    inner_split: SplitConfig
+    preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    models: tuple[SearchModelConfig, ...]
+    metrics: tuple[MetricName, ...]
+    primary_metric: MetricName
+    budget: SearchBudget
+    final_search: FinalSearchConfig = Field(default_factory=FinalSearchConfig)
+    seed: int = Field(default=42, ge=0, le=2**32 - 1)
+    output: OutputConfig = Field(default_factory=OutputConfig)
+
+    @field_validator("models")
+    @classmethod
+    def search_models_are_valid(
+        cls, value: tuple[SearchModelConfig, ...]
+    ) -> tuple[SearchModelConfig, ...]:
+        if not value:
+            raise ValueError("at least one search candidate is required")
+        identifiers = [model.id or model.name for model in value]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("search candidate identifiers must be unique")
+        if not any(model.mode == "search" for model in value):
+            raise ValueError("at least one model must use mode='search'")
+        return value
+
+    @field_validator("metrics")
+    @classmethod
+    def search_metrics_are_nonempty_and_unique(
+        cls, value: tuple[MetricName, ...]
+    ) -> tuple[MetricName, ...]:
+        if not value:
+            raise ValueError("at least one metric is required")
+        if len(set(value)) != len(value):
+            raise ValueError("metrics must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def validate_search_semantics(self) -> SearchConfig:
+        if self.task != TaskType.BINARY_CLASSIFICATION:
+            raise ValueError("V0.3 search supports only task='binary_classification'")
+        if isinstance(self.dataset, FileDatasetConfig) and self.dataset.task != self.task:
+            raise ValueError("file dataset task must match the search task")
+        if self.primary_metric not in self.metrics:
+            raise ValueError("primary_metric must also be present in metrics")
+        return self
+
+    def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
+        data = self.model_dump(mode="json", exclude_none=True)
+        data["models"] = sorted(
+            data["models"],
+            key=lambda model: json.dumps(model, sort_keys=True, separators=(",", ":")),
+        )
+        if not include_output:
+            data.pop("output", None)
+        return data
+
+    def fingerprint_for_dataset(
+        self, dataset_identity: str, search_space_identity: dict[str, Any] | str
+    ) -> str:
+        search_semantics = self.canonical_dict(include_output=False)
+        dataset_semantics = search_semantics["dataset"]
+        if isinstance(dataset_semantics, dict) and "source" in dataset_semantics:
+            dataset_semantics.pop("path", None)
+        semantics = {
+            "search": search_semantics,
+            "resolved_dataset_identity": dataset_identity,
+            "search_spaces": search_space_identity,
+        }
+        canonical = json.dumps(semantics, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+    def to_run_config(
+        self,
+        model: ModelConfig,
+        *,
+        split: SplitConfig,
+        seed: int,
+    ) -> RunConfig:
+        return RunConfig(
+            task=self.task,
+            dataset=self.dataset,
+            split=split,
+            preprocessing=self.preprocessing,
+            model=model,
+            metrics=self.metrics,
+            seed=seed,
+            output=self.output,
+        )
+
+
+def load_search_config(path: str | Path) -> SearchConfig:
+    config_path = Path(path)
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"cannot read configuration {config_path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"invalid YAML in {config_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"configuration {config_path} must contain a YAML mapping")
+    return SearchConfig.model_validate(raw)

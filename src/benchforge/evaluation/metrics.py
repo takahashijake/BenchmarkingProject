@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,6 +15,25 @@ from benchforge.core.config import MetricName
 class AggregateMetric:
     mean: float
     std: float
+
+
+@dataclass(frozen=True)
+class MetricSpec:
+    name: MetricName
+    direction: Literal["maximize", "minimize"]
+    requires_score: bool = False
+
+
+_METRIC_SPECS = {
+    MetricName.ACCURACY: MetricSpec(MetricName.ACCURACY, "maximize"),
+    MetricName.BALANCED_ACCURACY: MetricSpec(MetricName.BALANCED_ACCURACY, "maximize"),
+    MetricName.F1: MetricSpec(MetricName.F1, "maximize"),
+    MetricName.ROC_AUC: MetricSpec(MetricName.ROC_AUC, "maximize", requires_score=True),
+}
+
+
+def metric_spec(name: MetricName) -> MetricSpec:
+    return _METRIC_SPECS[name]
 
 
 def compute_metrics(
