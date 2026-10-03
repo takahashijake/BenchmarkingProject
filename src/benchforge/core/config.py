@@ -24,6 +24,9 @@ class MetricName(StrEnum):
     BALANCED_ACCURACY = "balanced_accuracy"
     F1 = "f1"
     ROC_AUC = "roc_auc"
+    MEAN_ABSOLUTE_ERROR = "mean_absolute_error"
+    ROOT_MEAN_SQUARED_ERROR = "root_mean_squared_error"
+    R2 = "r2"
 
 
 class DatasetConfig(StrictModel):
@@ -51,7 +54,7 @@ DatasetSourceConfig = DatasetConfig | FileDatasetConfig
 
 
 class SplitConfig(StrictModel):
-    strategy: Literal["stratified_kfold"] = "stratified_kfold"
+    strategy: Literal["stratified_kfold", "kfold"] = "stratified_kfold"
     n_splits: int = Field(default=5, ge=2)
     shuffle: Literal[True] = True
 
@@ -111,10 +114,9 @@ class RunConfig(StrictModel):
 
     @model_validator(mode="after")
     def metrics_match_task(self) -> RunConfig:
-        if self.task != TaskType.BINARY_CLASSIFICATION:
-            raise ValueError("V0 supports only task='binary_classification'")
         if isinstance(self.dataset, FileDatasetConfig) and self.dataset.task != self.task:
             raise ValueError("file dataset task must match the run task")
+        _validate_task_semantics(self.task, self.split, self.metrics)
         return self
 
     def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
@@ -193,12 +195,11 @@ class BenchmarkConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_benchmark_semantics(self) -> BenchmarkConfig:
-        if self.task != TaskType.BINARY_CLASSIFICATION:
-            raise ValueError("V0.2 supports only task='binary_classification'")
         if isinstance(self.dataset, FileDatasetConfig) and self.dataset.task != self.task:
             raise ValueError("file dataset task must match the benchmark task")
         if self.primary_metric not in self.metrics:
             raise ValueError("primary_metric must also be present in metrics")
+        _validate_task_semantics(self.task, self.split, self.metrics)
         return self
 
     def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
@@ -314,12 +315,12 @@ class SearchConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_search_semantics(self) -> SearchConfig:
-        if self.task != TaskType.BINARY_CLASSIFICATION:
-            raise ValueError("V0.3 search supports only task='binary_classification'")
         if isinstance(self.dataset, FileDatasetConfig) and self.dataset.task != self.task:
             raise ValueError("file dataset task must match the search task")
         if self.primary_metric not in self.metrics:
             raise ValueError("primary_metric must also be present in metrics")
+        _validate_task_semantics(self.task, self.outer_split, self.metrics)
+        _validate_task_semantics(self.task, self.inner_split, self.metrics)
         return self
 
     def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
@@ -377,3 +378,21 @@ def load_search_config(path: str | Path) -> SearchConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"configuration {config_path} must contain a YAML mapping")
     return SearchConfig.model_validate(raw)
+
+
+def _validate_task_semantics(
+    task: TaskType, split: SplitConfig, metrics: tuple[MetricName, ...]
+) -> None:
+    expected_split = "stratified_kfold" if task == TaskType.BINARY_CLASSIFICATION else "kfold"
+    if split.strategy != expected_split:
+        raise ValueError(
+            f"split strategy '{split.strategy}' is incompatible with task '{task}'; "
+            f"use '{expected_split}'"
+        )
+    # Local import keeps configuration contracts independent while making the metric
+    # registry the single source of truth for compatibility.
+    from benchforge.evaluation.metrics import metric_spec
+
+    incompatible = [metric.value for metric in metrics if metric_spec(metric).task != task]
+    if incompatible:
+        raise ValueError(f"metrics {', '.join(incompatible)} are incompatible with task '{task}'")

@@ -3,8 +3,9 @@ from __future__ import annotations
 import csv
 import hashlib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 from pandas.api.types import (
     is_bool_dtype,
@@ -58,21 +59,44 @@ def dataset_from_frame(frame: pd.DataFrame, config: FileDatasetConfig, identity:
         raise ValueError(f"ignored/id columns do not exist: {', '.join(missing_ignored)}")
     if config.target_column in config.id_columns:
         raise ValueError("target column cannot also be an ignored/id column")
-    if config.task != TaskType.BINARY_CLASSIFICATION:
-        raise ValueError("V0.2 file ingestion supports only binary_classification")
-
     raw_target = frame[config.target_column]
     if raw_target.isna().any():
         raise ValueError(f"target column '{config.target_column}' contains missing values")
-    unique_targets = list(pd.unique(raw_target))
-    if len(unique_targets) != 2:
-        raise ValueError(
-            "binary-classification target must contain exactly 2 classes; "
-            f"found {len(unique_targets)}"
+    target_labels: tuple[str, ...] | None = None
+    target_statistics = None
+    target: pd.Series[Any]
+    if config.task == TaskType.BINARY_CLASSIFICATION:
+        unique_targets = list(pd.unique(raw_target))
+        if len(unique_targets) != 2:
+            raise ValueError(
+                "binary-classification target must contain exactly 2 classes; "
+                f"found {len(unique_targets)}"
+            )
+        ordered_targets = sorted(unique_targets, key=lambda value: (str(type(value)), str(value)))
+        mapping = {value: index for index, value in enumerate(ordered_targets)}
+        target = raw_target.map(mapping).astype(int).rename(config.target_column)
+        target_labels = tuple(str(value) for value in ordered_targets)
+    else:
+        from benchforge.data.registry import RegressionTargetSummary
+
+        if len(raw_target) == 0:
+            raise ValueError("regression target must contain at least one row")
+        if is_bool_dtype(raw_target.dtype) or not is_numeric_dtype(raw_target.dtype):
+            raise ValueError("regression target must be numeric")
+        target = raw_target.astype(float).rename(config.target_column)
+        values = target.to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError("regression target must contain only finite values")
+        unique_count = int(target.nunique())
+        if unique_count < 2:
+            raise ValueError("regression target must contain at least two distinct values")
+        target_statistics = RegressionTargetSummary(
+            minimum=float(target.min()),
+            maximum=float(target.max()),
+            mean=float(target.mean()),
+            standard_deviation=float(target.std(ddof=0)),
+            unique_values=unique_count,
         )
-    ordered_targets = sorted(unique_targets, key=lambda value: (str(type(value)), str(value)))
-    mapping = {value: index for index, value in enumerate(ordered_targets)}
-    target = raw_target.map(mapping).astype(int).rename(config.target_column)
 
     features = frame.drop(columns=[config.target_column, *config.id_columns]).copy(deep=True)
     if features.shape[1] == 0:
@@ -121,7 +145,8 @@ def dataset_from_frame(frame: pd.DataFrame, config: FileDatasetConfig, identity:
         categorical_feature_names=tuple(categorical),
         target_name=config.target_column,
         missing_values={name: int(features[name].isna().sum()) for name in feature_names},
-        target_labels=(str(ordered_targets[0]), str(ordered_targets[1])),
+        target_labels=target_labels,
+        target_statistics=target_statistics,
     )
 
 

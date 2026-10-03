@@ -43,6 +43,10 @@ def test_default_spaces_cover_searchable_families() -> None:
         "random_forest_classifier",
         "extra_trees_classifier",
         "hist_gradient_boosting_classifier",
+        "ridge_regressor",
+        "random_forest_regressor",
+        "extra_trees_regressor",
+        "hist_gradient_boosting_regressor",
     }
     with pytest.raises(ValueError, match="unsupported search family"):
         default_search_space_registry.resolve("dummy_classifier")

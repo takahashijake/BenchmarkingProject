@@ -3,14 +3,15 @@
 BenchForge is reproducible benchmarking infrastructure for classical machine learning. It turns a
 strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
-BenchForge V0.3 has three workflow levels:
+BenchForge V0.4 supports binary classification and regression through the same three workflow
+levels:
 
 - `benchforge run`: execute one concrete pipeline.
 - `benchforge benchmark`: compare several concrete pipelines on shared folds.
 - `benchforge search`: tune several model families under a finite budget and compare the tuning
   procedures using untouched, shared outer folds.
 
-Future AutoML may orchestrate the search layer, but automatic pipeline invention is not V0.3.
+Future AutoML may orchestrate the search layer, but automatic pipeline invention is not V0.4.
 
 ## Installation and examples
 
@@ -26,6 +27,10 @@ benchforge benchmark configs/examples/breast_cancer_suite.yaml
 benchforge benchmark configs/examples/mixed_tabular_suite.yaml
 benchforge search configs/examples/breast_cancer_search.yaml
 benchforge search configs/examples/mixed_tabular_search.yaml
+benchforge run configs/examples/diabetes_regression_run.yaml
+benchforge benchmark configs/examples/diabetes_regression_suite.yaml
+benchforge search configs/examples/diabetes_regression_search.yaml
+benchforge run configs/examples/rental_prices_regression_run.yaml
 ```
 
 The Python API exposes `load_run_config()` / `run_benchmark()`,
@@ -91,7 +96,8 @@ cannot change the already-computed nested leaderboard.
 
 ## Data and leakage-safe preprocessing
 
-BenchForge includes the sklearn Breast Cancer Wisconsin dataset and reads local CSV or Parquet:
+BenchForge includes the offline sklearn Breast Cancer Wisconsin classification dataset and
+Diabetes regression dataset, and reads local CSV or Parquet:
 
 ```yaml
 dataset:
@@ -104,17 +110,24 @@ dataset:
   allow_high_cardinality: false
 ```
 
-Files are content-addressed. BenchForge validates paths, columns, binary targets, dtypes, feature
+For regression files, use `task: regression`; targets must be numeric, finite, non-missing, and
+non-constant. Integer-valued regression targets remain continuous and are never class encoded.
+Files are content-addressed. BenchForge validates paths, columns, targets, dtypes, feature
 availability, and categorical cardinality. Numeric columns use optional median imputation and
 standardization. Categorical columns use most-frequent imputation and one-hot encoding with unknown
 category handling. A fresh sklearn pipeline is fitted inside every inner or ordinary training fold;
 learned preprocessing state is never shared across folds.
 
-## Models, metrics, and search spaces
+## Tasks, models, metrics, and search spaces
 
-Supported classifiers are Logistic Regression, Random Forest, Extra Trees, Histogram Gradient
-Boosting, and DummyClassifier. Supported metrics are accuracy, balanced accuracy, F1, and ROC-AUC.
-Metric metadata records optimization direction; all current metrics are higher-is-better.
+Binary classification uses stratified K-fold and supports Logistic Regression, Random Forest,
+Extra Trees, Histogram Gradient Boosting, and DummyClassifier. Its metrics are ROC-AUC, F1,
+accuracy, and balanced accuracy; all are maximized.
+
+Regression uses shuffled deterministic K-fold and supports Linear Regression, Ridge, Random
+Forest, Extra Trees, Histogram Gradient Boosting, and DummyRegressor. Its metrics are RMSE and MAE
+(minimized) and R² (maximized). Natural error values are retained: an RMSE of `52.34` is optimized
+as `52.34` with direction `minimize`, never negated.
 
 Versioned curated search spaces cover:
 
@@ -122,8 +135,14 @@ Versioned curated search spaces cover:
 - Random Forest and Extra Trees: estimator count, depth, split/leaf sizes, feature sampling, and
   class weight.
 - Histogram Gradient Boosting: learning rate, iterations, leaves, leaf size, L2, and depth.
+- Ridge: broad log-scaled `alpha`.
+- Regression Random Forest and Extra Trees: estimator count, depth, split/leaf sizes, and feature
+  sampling.
+- Regression Histogram Gradient Boosting: learning rate, iterations, leaves, leaf size, L2, and
+  optional depth.
 
-DummyClassifier is a fixed baseline and has no search space. Tree estimators default to `n_jobs=1`.
+DummyClassifier and DummyRegressor are fixed baselines and have no search spaces. LinearRegression
+may also remain fixed. Tree estimators default to `n_jobs=1`.
 
 ## Failure and ranking semantics
 
@@ -172,12 +191,11 @@ See [the architecture document](docs/architecture.md) for dependency boundaries.
 
 ## Current limitations and roadmap
 
-V0.3 search is single-process and supports binary classification with stratified K-fold only. It
-does not implement regression, pruning, multi-objective search, arbitrary pipelines,
-feature-selection search, full AutoML, XGBoost, LightGBM, CatBoost, neural networks, GPUs,
-distributed workers, robustness suites, statistical significance testing, a persistent analytics
-catalog, model deployment, or a web UI.
+V0.4 search is single-process and supports binary classification and regression. It does not
+implement multiclass classification, pruning, multi-objective search, arbitrary pipelines,
+feature-selection or preprocessing search, full AutoML, XGBoost, LightGBM, CatBoost, neural
+networks, GPUs, distributed workers, robustness suites, statistical significance testing, a
+persistent analytics catalog, model deployment, or a web UI.
 
-The suggested next major slice is regression support: lower-is-better metric specifications,
-regression models, compatible split planning, and versioned regression search spaces. A broader
-AutoML controller should remain above—not inside—the reusable search layer.
+The suggested next major slice is an AutoML controller that composes the proven fixed benchmark and
+search layers without moving policy into the experiment kernel.

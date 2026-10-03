@@ -45,6 +45,7 @@ class LocalArtifactStore:
             "python_version": platform.python_version(),
             "scikit_learn_version": sklearn.__version__,
             "dataset_identity": result.dataset_identity,
+            "dataset_summary": asdict(result.dataset),
             "config_fingerprint": result.fingerprint,
             "seed": result.seed,
         }

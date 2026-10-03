@@ -1,0 +1,17 @@
+schema_version: 1
+task: regression
+dataset:
+  source: csv
+  path: configs/examples/data/rental_prices.csv
+  target_column: monthly_rent
+  id_columns: [property_id]
+  task: regression
+  categorical_cardinality_limit: 20
+split: {strategy: kfold, n_splits: 4, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+model:
+  name: ridge_regressor
+  parameters: {alpha: 1.0}
+metrics: [root_mean_squared_error, mean_absolute_error, r2]
+seed: 42
+output: {directory: artifacts}

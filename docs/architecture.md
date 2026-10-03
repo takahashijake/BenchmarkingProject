@@ -1,4 +1,4 @@
-# BenchForge V0.3 architecture
+# BenchForge V0.4 architecture
 
 BenchForge separates atomic execution, fixed comparison, and search orchestration:
 
@@ -23,16 +23,20 @@ CLI
 `run_benchmark()` remains the atomic CV execution unit and retains the V0 API. It may resolve its
 own data/folds or accept a resolved `Dataset` and immutable fold tuple. Its extracted
 `execute_fold()` operation performs the one final outer evaluation for a selected configuration.
-Preprocessing, estimator construction, prediction, and scoring have one implementation.
+Preprocessing, estimator construction, prediction, and scoring have one task-aware implementation;
+there are no separate classification and regression runners.
 
 ## Dependency boundaries
 
 - `core` owns strict run, benchmark, and search configurations and semantic serialization.
 - `data` owns built-in/file loading, validation, schema inference, and content identity.
-- `splits` owns deterministic flat and nested fold plans in original dataset index space.
+- `splits` owns task-aware deterministic flat and nested fold plans in original dataset index
+  space: stratified K-fold for binary classification and K-fold for regression.
 - `preprocessing` builds fresh fold-local sklearn transformers.
-- `models` owns estimator factories and minimal dense-input capability metadata.
-- `evaluation` owns metrics, optimization direction, and fold aggregation.
+- `models` owns estimator factories, supported-task metadata, and minimal dense-input capability
+  metadata.
+- `evaluation` owns metric task compatibility, score requirements, optimization direction, and
+  fold aggregation.
 - `execution.runner` is the atomic CV/fold kernel.
 - `execution.benchmark` owns fixed multi-candidate orchestration.
 - `search.spaces` and `search.registry` own versioned Optuna proposal semantics independently of
@@ -57,6 +61,9 @@ Outer-validation indices are recorded for audit but passed only to the post-sele
 `execute_fold()` call. They cannot affect proposal, pruning (not implemented), preprocessing,
 objective scores, or parameter selection. Sentinel regression tests structurally prove that no
 outer-validation sample enters inner training or validation.
+
+This boundary is identical for both tasks. Classification nests stratified folds; regression nests
+K-fold partitions. In both cases inner indices are mapped back to global dataset index space.
 
 The tuned-family leaderboard aggregates the exactly-once outer results. Inner objective scores
 select parameters only. The optional final full-data score selects deployment parameters only.
@@ -87,12 +94,13 @@ and timestamp fields are not deterministic.
 
 Artifacts preserve shared outer folds, every nested split plan, complete/failed/pruned trial
 records, selected inner parameters/scores, outer metrics and predictions, aggregate family
-evidence, and optional final selection. JSON/CSV is sufficient for V0.3; no Optuna database is
+evidence, and optional final selection. JSON/CSV is sufficient for V0.4; no Optuna database is
 required.
 
 ## Deliberately deferred
 
-Regression, pruning, multi-objective optimization, arbitrary pipeline generation, feature search,
-full AutoML policy, XGBoost, LightGBM, CatBoost, neural networks, GPU/distributed scheduling,
+Multiclass classification, pruning, multi-objective optimization, arbitrary pipeline generation,
+feature/preprocessing search, full AutoML policy, XGBoost, LightGBM, CatBoost, neural networks,
+GPU/distributed scheduling,
 robustness suites, statistical significance, deployment, persistent analytics, and web UI remain
 future work.

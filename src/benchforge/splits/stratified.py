@@ -3,9 +3,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold
 
-from benchforge.core.config import SplitConfig
+from benchforge.core.config import SplitConfig, TaskType
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,8 @@ class Fold:
 
 
 def build_stratified_folds(target: pd.Series, config: SplitConfig, seed: int) -> tuple[Fold, ...]:
+    if config.strategy != "stratified_kfold":
+        raise ValueError("binary classification requires split strategy 'stratified_kfold'")
     class_counts = target.value_counts()
     if len(class_counts) != 2:
         raise ValueError("stratified binary cross-validation requires exactly two target classes")
@@ -37,16 +39,43 @@ def build_stratified_folds(target: pd.Series, config: SplitConfig, seed: int) ->
     return tuple(folds)
 
 
+def build_kfold_folds(target: pd.Series, config: SplitConfig, seed: int) -> tuple[Fold, ...]:
+    if config.strategy != "kfold":
+        raise ValueError("regression requires split strategy 'kfold'")
+    if len(target) < config.n_splits:
+        raise ValueError(f"K-fold cross-validation needs at least {config.n_splits} rows")
+    splitter = KFold(
+        n_splits=config.n_splits,
+        shuffle=config.shuffle,
+        random_state=seed,
+    )
+    folds: list[Fold] = []
+    for fold_id, (train, validation) in enumerate(splitter.split(np.zeros(len(target)))):
+        train.setflags(write=False)
+        validation.setflags(write=False)
+        folds.append(Fold(fold_id, train, validation))
+    return tuple(folds)
+
+
+def build_folds(
+    target: pd.Series, config: SplitConfig, seed: int, task: TaskType
+) -> tuple[Fold, ...]:
+    if task == TaskType.BINARY_CLASSIFICATION:
+        return build_stratified_folds(target, config, seed)
+    return build_kfold_folds(target, config, seed)
+
+
 def build_inner_folds(
     target: pd.Series,
     outer_fold: Fold,
     config: SplitConfig,
     seed: int,
+    task: TaskType = TaskType.BINARY_CLASSIFICATION,
 ) -> tuple[Fold, ...]:
     """Build inner folds in global index space, strictly inside an outer training set."""
     outer_train = outer_fold.train_indices
-    relative_folds = build_stratified_folds(
-        target.iloc[outer_train].reset_index(drop=True), config, seed
+    relative_folds = build_folds(
+        target.iloc[outer_train].reset_index(drop=True), config, seed, task
     )
     folds: list[Fold] = []
     for relative in relative_folds:

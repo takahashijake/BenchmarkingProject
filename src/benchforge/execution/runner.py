@@ -8,12 +8,18 @@ from typing import Any
 import numpy as np
 from sklearn.pipeline import Pipeline
 
-from benchforge.core.config import RunConfig
-from benchforge.data.registry import Dataset, DatasetRegistry, default_dataset_registry
+from benchforge.core.config import RunConfig, TaskType
+from benchforge.data.registry import (
+    Dataset,
+    DatasetRegistry,
+    DatasetSummary,
+    default_dataset_registry,
+    summarize_dataset,
+)
 from benchforge.evaluation.metrics import AggregateMetric, aggregate_fold_metrics, compute_metrics
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.preprocessing.builder import build_preprocessor
-from benchforge.splits.stratified import Fold, build_stratified_folds
+from benchforge.splits.stratified import Fold, build_folds
 from benchforge.storage.local import LocalArtifactStore
 
 
@@ -29,8 +35,8 @@ class FoldResult:
 class PredictionRecord:
     sample_index: int
     fold_id: int
-    truth: int
-    prediction: int
+    truth: int | float
+    prediction: int | float
     score: float | None
 
 
@@ -38,6 +44,7 @@ class PredictionRecord:
 class RunResult:
     fingerprint: str
     dataset_identity: str
+    dataset: DatasetSummary
     model_name: str
     seed: int
     fold_results: tuple[FoldResult, ...]
@@ -72,7 +79,7 @@ def execute_fold(
 ) -> tuple[FoldResult, tuple[PredictionRecord, ...]]:
     """Execute one immutable fold using the same kernel as a normal run."""
     try:
-        estimator = model_registry.create(config.model, config.seed)
+        estimator = model_registry.create(config.model, config.seed, config.task)
         capabilities = model_registry.capabilities(config.model.name)
         pipeline = Pipeline(
             [
@@ -93,17 +100,28 @@ def execute_fold(
         validation_x = dataset.features.iloc[fold.validation_indices]
         validation_y = dataset.target.iloc[fold.validation_indices]
         pipeline.fit(train_x, train_y)
-        predicted = np.asarray(pipeline.predict(validation_x), dtype=np.int64)
-        score = _prediction_score(pipeline, validation_x)
-        truth = validation_y.to_numpy(dtype=np.int64)
-        metrics = compute_metrics(config.metrics, truth, predicted, score)
+        if config.task == TaskType.BINARY_CLASSIFICATION:
+            predicted = np.asarray(pipeline.predict(validation_x), dtype=np.int64)
+            truth = validation_y.to_numpy(dtype=np.int64)
+            score = _prediction_score(pipeline, validation_x)
+        else:
+            predicted = np.asarray(pipeline.predict(validation_x), dtype=np.float64)
+            truth = validation_y.to_numpy(dtype=np.float64)
+            score = None
+        metrics = compute_metrics(config.metrics, truth, predicted, score, config.task)
         fold_result = FoldResult(fold.fold_id, len(train_x), len(validation_x), metrics)
         predictions = tuple(
             PredictionRecord(
                 sample_index=int(sample_index),
                 fold_id=fold.fold_id,
-                truth=int(actual),
-                prediction=int(estimate),
+                truth=(
+                    int(actual) if config.task == TaskType.BINARY_CLASSIFICATION else float(actual)
+                ),
+                prediction=(
+                    int(estimate)
+                    if config.task == TaskType.BINARY_CLASSIFICATION
+                    else float(estimate)
+                ),
                 score=None if score is None else float(score[position]),
             )
             for position, (sample_index, actual, estimate) in enumerate(
@@ -136,7 +154,7 @@ def run_benchmark(
             f"dataset task '{dataset.task}' does not match configured task '{config.task}'"
         )
     if folds is None:
-        folds = build_stratified_folds(dataset.target, config.split, config.seed)
+        folds = build_folds(dataset.target, config.split, config.seed, config.task)
     if len(folds) != config.split.n_splits:
         raise ValueError(
             f"provided fold plan has {len(folds)} folds; expected {config.split.n_splits}"
@@ -154,6 +172,7 @@ def run_benchmark(
     result = RunResult(
         fingerprint=config.fingerprint,
         dataset_identity=dataset.identity,
+        dataset=summarize_dataset(dataset),
         model_name=config.model.name,
         seed=config.seed,
         fold_results=tuple(fold_results),

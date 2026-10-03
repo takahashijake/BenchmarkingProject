@@ -5,10 +5,19 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 import pandas as pd
-from sklearn.datasets import load_breast_cancer
+from sklearn.datasets import load_breast_cancer, load_diabetes
 
 from benchforge.core.config import DatasetSourceConfig, FileDatasetConfig, TaskType
 from benchforge.data.tabular import load_tabular_dataset
+
+
+@dataclass(frozen=True)
+class RegressionTargetSummary:
+    minimum: float
+    maximum: float
+    mean: float
+    standard_deviation: float
+    unique_values: int
 
 
 @dataclass(frozen=True)
@@ -22,7 +31,8 @@ class Dataset:
     categorical_feature_names: tuple[str, ...]
     target_name: str
     missing_values: dict[str, int]
-    target_labels: tuple[str, str]
+    target_labels: tuple[str, ...] | None = None
+    target_statistics: RegressionTargetSummary | None = None
 
     def __post_init__(self) -> None:
         if len(self.features) != len(self.target):
@@ -48,13 +58,30 @@ class Dataset:
 @dataclass(frozen=True)
 class DatasetSummary:
     identity: str
+    task: TaskType
     row_count: int
     feature_count: int
     numeric_features: tuple[str, ...]
     categorical_features: tuple[str, ...]
     target_name: str
-    target_labels: tuple[str, str]
+    target_labels: tuple[str, ...] | None
+    target_statistics: RegressionTargetSummary | None
     missing_values: dict[str, int]
+
+
+def summarize_dataset(dataset: Dataset) -> DatasetSummary:
+    return DatasetSummary(
+        identity=dataset.identity,
+        task=dataset.task,
+        row_count=dataset.row_count,
+        feature_count=dataset.feature_count,
+        numeric_features=dataset.numeric_feature_names,
+        categorical_features=dataset.categorical_feature_names,
+        target_name=dataset.target_name,
+        target_labels=dataset.target_labels,
+        target_statistics=dataset.target_statistics,
+        missing_values=dict(dataset.missing_values),
+    )
 
 
 DatasetLoader = Callable[[], Dataset]
@@ -92,6 +119,7 @@ def _copy_dataset(dataset: Dataset) -> Dataset:
         target_name=dataset.target_name,
         missing_values=dict(dataset.missing_values),
         target_labels=dataset.target_labels,
+        target_statistics=dataset.target_statistics,
     )
 
 
@@ -118,4 +146,35 @@ def _load_breast_cancer() -> Dataset:
     )
 
 
-default_dataset_registry = DatasetRegistry({"breast_cancer": _load_breast_cancer})
+def _load_diabetes() -> Dataset:
+    bunch = load_diabetes(as_frame=True)
+    frame = bunch.frame
+    if frame is None:
+        raise RuntimeError("scikit-learn did not return the requested DataFrame")
+    target_name = str(bunch.target.name)
+    features = frame.drop(columns=[target_name])
+    target = frame[target_name].astype(float)
+    feature_names = tuple(str(column) for column in features.columns)
+    return Dataset(
+        identity="sklearn:diabetes:v1",
+        task=TaskType.REGRESSION,
+        features=features,
+        target=target,
+        feature_names=feature_names,
+        numeric_feature_names=feature_names,
+        categorical_feature_names=(),
+        target_name=target_name,
+        missing_values={name: int(features[name].isna().sum()) for name in feature_names},
+        target_statistics=RegressionTargetSummary(
+            minimum=float(target.min()),
+            maximum=float(target.max()),
+            mean=float(target.mean()),
+            standard_deviation=float(target.std(ddof=0)),
+            unique_values=int(target.nunique()),
+        ),
+    )
+
+
+default_dataset_registry = DatasetRegistry(
+    {"breast_cancer": _load_breast_cancer, "diabetes": _load_diabetes}
+)

@@ -7,10 +7,20 @@ from time import perf_counter
 
 import optuna
 
-from benchforge.core.config import JsonScalar, ModelConfig, SearchConfig, SearchModelConfig
-from benchforge.data.registry import Dataset, DatasetRegistry, default_dataset_registry
+from benchforge.core.config import (
+    JsonScalar,
+    ModelConfig,
+    SearchConfig,
+    SearchModelConfig,
+    TaskType,
+)
+from benchforge.data.registry import (
+    Dataset,
+    DatasetRegistry,
+    default_dataset_registry,
+    summarize_dataset,
+)
 from benchforge.evaluation.metrics import aggregate_fold_metrics, metric_spec
-from benchforge.execution.benchmark import summarize_dataset
 from benchforge.execution.runner import FoldExecutionError, execute_fold, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.search.registry import SearchSpaceRegistry, default_search_space_registry
@@ -24,7 +34,7 @@ from benchforge.search.results import (
     TunedLeaderboardEntry,
 )
 from benchforge.search.spaces import SearchSpace
-from benchforge.splits.stratified import Fold, build_inner_folds, build_stratified_folds
+from benchforge.splits.stratified import Fold, build_folds, build_inner_folds
 
 
 class TrialEvaluationError(RuntimeError):
@@ -64,9 +74,10 @@ def _validate_model_parameters(
     parameters: dict[str, JsonScalar],
     seed: int,
     model_registry: ModelRegistry,
+    task: TaskType,
 ) -> None:
     config = ModelConfig(name=candidate.name, id=candidate.id, parameters=parameters)
-    model_registry.create(config, seed)
+    model_registry.create(config, seed, task)
     model_registry.capabilities(candidate.name)
 
 
@@ -106,7 +117,9 @@ def _run_study(
     model_registry: ModelRegistry,
 ) -> tuple[dict[str, JsonScalar], float, tuple[TrialRecord, ...]]:
     base_parameters = _parameters(space, candidate, {})
-    _validate_model_parameters(candidate, base_parameters, estimator_seed, model_registry)
+    _validate_model_parameters(
+        candidate, base_parameters, estimator_seed, model_registry, config.task
+    )
     direction = metric_spec(config.primary_metric).direction
 
     def objective(trial: optuna.trial.Trial) -> float:
@@ -187,7 +200,7 @@ def _search_family(
     space = search_space_registry.resolve(candidate.name) if candidate.mode == "search" else None
     if candidate.mode == "fixed":
         _validate_model_parameters(
-            candidate, dict(candidate.parameters), config.seed, model_registry
+            candidate, dict(candidate.parameters), config.seed, model_registry, config.task
         )
     fold_results: list[OuterFoldSearchResult] = []
 
@@ -350,10 +363,11 @@ def _final_search(
     started = perf_counter()
     candidate = family.candidate
     identifier = family.model_identifier
-    folds = build_stratified_folds(
+    folds = build_folds(
         dataset.target,
         config.inner_split,
         derive_seed(config.seed, "final", "folds", identifier),
+        config.task,
     )
     estimator_seed = derive_seed(config.seed, "final", "estimator", identifier)
     if candidate.mode == "search":
@@ -418,13 +432,14 @@ def run_search(
     searchable = {model.name for model in config.models if model.mode == "search"}
     space_identity = search_space_registry.identity_for(searchable)
     fingerprint = config.fingerprint_for_dataset(dataset.identity, space_identity)
-    outer_folds = build_stratified_folds(dataset.target, config.outer_split, config.seed)
+    outer_folds = build_folds(dataset.target, config.outer_split, config.seed, config.task)
     inner_folds = {
         outer.fold_id: build_inner_folds(
             dataset.target,
             outer,
             config.inner_split,
             derive_seed(config.seed, "inner_folds", outer.fold_id),
+            config.task,
         )
         for outer in outer_folds
     }

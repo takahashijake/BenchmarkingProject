@@ -6,9 +6,17 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    r2_score,
+    roc_auc_score,
+    root_mean_squared_error,
+)
 
-from benchforge.core.config import MetricName
+from benchforge.core.config import MetricName, TaskType
 
 
 @dataclass(frozen=True)
@@ -20,15 +28,45 @@ class AggregateMetric:
 @dataclass(frozen=True)
 class MetricSpec:
     name: MetricName
+    task: TaskType
     direction: Literal["maximize", "minimize"]
     requires_score: bool = False
+    display_name: str = ""
 
 
-_METRIC_SPECS = {
-    MetricName.ACCURACY: MetricSpec(MetricName.ACCURACY, "maximize"),
-    MetricName.BALANCED_ACCURACY: MetricSpec(MetricName.BALANCED_ACCURACY, "maximize"),
-    MetricName.F1: MetricSpec(MetricName.F1, "maximize"),
-    MetricName.ROC_AUC: MetricSpec(MetricName.ROC_AUC, "maximize", requires_score=True),
+_METRIC_SPECS: dict[MetricName, MetricSpec] = {
+    MetricName.ACCURACY: MetricSpec(
+        MetricName.ACCURACY, TaskType.BINARY_CLASSIFICATION, "maximize", display_name="Accuracy"
+    ),
+    MetricName.BALANCED_ACCURACY: MetricSpec(
+        MetricName.BALANCED_ACCURACY,
+        TaskType.BINARY_CLASSIFICATION,
+        "maximize",
+        display_name="Balanced accuracy",
+    ),
+    MetricName.F1: MetricSpec(
+        MetricName.F1, TaskType.BINARY_CLASSIFICATION, "maximize", display_name="F1"
+    ),
+    MetricName.ROC_AUC: MetricSpec(
+        MetricName.ROC_AUC,
+        TaskType.BINARY_CLASSIFICATION,
+        "maximize",
+        requires_score=True,
+        display_name="ROC-AUC",
+    ),
+    MetricName.MEAN_ABSOLUTE_ERROR: MetricSpec(
+        MetricName.MEAN_ABSOLUTE_ERROR,
+        TaskType.REGRESSION,
+        "minimize",
+        display_name="MAE",
+    ),
+    MetricName.ROOT_MEAN_SQUARED_ERROR: MetricSpec(
+        MetricName.ROOT_MEAN_SQUARED_ERROR,
+        TaskType.REGRESSION,
+        "minimize",
+        display_name="RMSE",
+    ),
+    MetricName.R2: MetricSpec(MetricName.R2, TaskType.REGRESSION, "maximize", display_name="R²"),
 }
 
 
@@ -38,12 +76,16 @@ def metric_spec(name: MetricName) -> MetricSpec:
 
 def compute_metrics(
     requested: Sequence[MetricName],
-    truth: NDArray[np.int64],
-    prediction: NDArray[np.int64],
+    truth: NDArray[np.int64] | NDArray[np.float64],
+    prediction: NDArray[np.int64] | NDArray[np.float64],
     score: NDArray[np.float64] | None,
+    task: TaskType | None = None,
 ) -> dict[str, float]:
     values: dict[str, float] = {}
     for metric in requested:
+        spec = metric_spec(metric)
+        if task is not None and spec.task != task:
+            raise ValueError(f"metric '{metric}' is incompatible with task '{task}'")
         if metric == MetricName.ACCURACY:
             value = accuracy_score(truth, prediction)
         elif metric == MetricName.BALANCED_ACCURACY:
@@ -54,6 +96,12 @@ def compute_metrics(
             if score is None:
                 raise ValueError("metric 'roc_auc' requires predict_proba or decision_function")
             value = roc_auc_score(truth, score)
+        elif metric == MetricName.MEAN_ABSOLUTE_ERROR:
+            value = mean_absolute_error(truth, prediction)
+        elif metric == MetricName.ROOT_MEAN_SQUARED_ERROR:
+            value = root_mean_squared_error(truth, prediction)
+        elif metric == MetricName.R2:
+            value = r2_score(truth, prediction)
         else:  # pragma: no cover - enum validation makes this defensive
             raise ValueError(f"unsupported metric '{metric}'")
         values[metric.value] = float(value)

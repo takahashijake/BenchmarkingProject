@@ -1,3 +1,5 @@
+from benchforge.core.config import MetricName
+from benchforge.evaluation.metrics import metric_spec
 from benchforge.execution.benchmark import BenchmarkResult
 from benchforge.execution.runner import RunResult
 from benchforge.search.results import SearchResult
@@ -5,7 +7,9 @@ from benchforge.search.results import SearchResult
 
 def format_run_summary(result: RunResult) -> str:
     metric_lines = "\n".join(
-        f"  {name}: {value.mean:.4f} ± {value.std:.4f}"
+        f"  {metric_spec(MetricName(name)).display_name} "
+        f"{'↑' if metric_spec(MetricName(name)).direction == 'maximize' else '↓'}: "
+        f"{value.mean:.4f} ± {value.std:.4f}"
         for name, value in result.aggregate_metrics.items()
     )
     artifact = str(result.artifact_directory) if result.artifact_directory else "not persisted"
@@ -21,6 +25,7 @@ def format_run_summary(result: RunResult) -> str:
 
 
 def format_benchmark_summary(result: BenchmarkResult) -> str:
+    spec = metric_spec(MetricName(result.primary_metric))
     rows = []
     for entry in result.leaderboard:
         if entry.status == "success":
@@ -45,8 +50,10 @@ def format_benchmark_summary(result: BenchmarkResult) -> str:
         f"Dataset: {result.dataset.identity}\n"
         f"Shape: {result.dataset.row_count} rows × {result.dataset.feature_count} features\n"
         f"Folds: {result.fold_count}\n"
-        f"Primary metric: {result.primary_metric}\n"
-        "Leaderboard (highest measured mean first):\n"
+        f"Primary metric: {spec.display_name} "
+        f"({'higher' if spec.direction == 'maximize' else 'lower'} is better)\n"
+        f"Leaderboard ({'highest' if spec.direction == 'maximize' else 'lowest'} "
+        "measured mean first):\n"
         + "\n".join(rows)
         + failures
         + f"\nFingerprint: {result.fingerprint}\n"
@@ -55,6 +62,7 @@ def format_benchmark_summary(result: BenchmarkResult) -> str:
 
 
 def format_search_summary(result: SearchResult) -> str:
+    spec = metric_spec(MetricName(result.primary_metric))
     rows = []
     for entry in result.leaderboard:
         if entry.status == "success":
@@ -92,11 +100,17 @@ def format_search_summary(result: SearchResult) -> str:
         f"Dataset: {result.dataset.identity}\n"
         f"Outer folds: {result.outer_fold_count}\n"
         f"Inner folds: {result.inner_fold_count}\n"
-        f"Optimization metric: {result.primary_metric} ({result.optimization_direction})\n"
+        f"Optimization metric: {spec.display_name} "
+        f"({'higher' if spec.direction == 'maximize' else 'lower'} is better; "
+        f"{result.optimization_direction})\n"
         "Tuned-family leaderboard (outer-fold held-out means only):\n"
         + "\n".join(rows)
         + failures
-        + f"\nTop measured tuned family: {top.model_identifier}"
+        + (
+            f"\nTop measured tuned family: {top.model_identifier}"
+            if spec.direction == "maximize"
+            else f"\nTop measured result under {spec.display_name}: {top.model_identifier}"
+        )
         + final
         + f"\nNested evaluation estimate: {result.primary_metric} "
         f"{top.primary_metric_mean:.4f} ± {top.primary_metric_std:.4f}\n"

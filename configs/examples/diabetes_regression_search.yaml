@@ -1,0 +1,26 @@
+schema_version: 1
+task: regression
+dataset:
+  name: diabetes
+outer_split: {strategy: kfold, n_splits: 2, shuffle: true}
+inner_split: {strategy: kfold, n_splits: 2, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+models:
+  - {name: ridge_regressor, id: ridge, mode: search}
+  - {name: random_forest_regressor, id: forest, mode: search}
+  - {name: extra_trees_regressor, id: extra_trees, mode: search}
+  - {name: hist_gradient_boosting_regressor, id: hist_gradient_boosting, mode: search}
+  - name: dummy_regressor
+    id: dummy
+    mode: fixed
+    parameters: {strategy: mean}
+metrics: [root_mean_squared_error, mean_absolute_error, r2]
+primary_metric: root_mean_squared_error
+budget:
+  trials_per_outer_fold: 2
+final_search:
+  enabled: true
+  trials: 3
+seed: 42
+output:
+  directory: artifacts

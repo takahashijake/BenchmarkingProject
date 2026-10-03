@@ -6,15 +6,15 @@ from time import perf_counter
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
 from benchforge.data.registry import (
-    Dataset,
     DatasetRegistry,
     DatasetSummary,
     default_dataset_registry,
+    summarize_dataset,
 )
-from benchforge.evaluation.metrics import AggregateMetric
+from benchforge.evaluation.metrics import AggregateMetric, metric_spec
 from benchforge.execution.runner import RunResult, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
-from benchforge.splits.stratified import build_stratified_folds
+from benchforge.splits.stratified import build_folds
 from benchforge.storage.suite import BenchmarkArtifactStore
 
 
@@ -59,28 +59,20 @@ class BenchmarkResult:
     artifact_directory: Path | None = None
 
 
-def summarize_dataset(dataset: Dataset) -> DatasetSummary:
-    return DatasetSummary(
-        identity=dataset.identity,
-        row_count=dataset.row_count,
-        feature_count=dataset.feature_count,
-        numeric_features=dataset.numeric_feature_names,
-        categorical_features=dataset.categorical_feature_names,
-        target_name=dataset.target_name,
-        target_labels=dataset.target_labels,
-        missing_values=dict(dataset.missing_values),
-    )
-
-
 def _build_leaderboard(
     candidates: list[CandidateResult],
     failures: list[CandidateFailure],
     primary_metric: str,
+    direction: str,
 ) -> tuple[LeaderboardEntry, ...]:
     ordered = sorted(
         candidates,
         key=lambda candidate: (
-            -candidate.run_result.aggregate_metrics[primary_metric].mean,
+            (
+                -candidate.run_result.aggregate_metrics[primary_metric].mean
+                if direction == "maximize"
+                else candidate.run_result.aggregate_metrics[primary_metric].mean
+            ),
             candidate.model_identifier,
         ),
     )
@@ -124,7 +116,7 @@ def run_benchmark_suite(
         raise ValueError(
             f"dataset task '{dataset.task}' does not match configured task '{config.task}'"
         )
-    folds = build_stratified_folds(dataset.target, config.split, config.seed)
+    folds = build_folds(dataset.target, config.split, config.seed, config.task)
     candidates: list[CandidateResult] = []
     failures: list[CandidateFailure] = []
 
@@ -168,7 +160,9 @@ def run_benchmark_suite(
         fold_count=len(folds),
         candidates=tuple(candidates),
         failures=tuple(failures),
-        leaderboard=_build_leaderboard(candidates, failures, primary_metric),
+        leaderboard=_build_leaderboard(
+            candidates, failures, primary_metric, metric_spec(config.primary_metric).direction
+        ),
         total_duration_seconds=perf_counter() - started,
     )
     if persist:
