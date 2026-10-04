@@ -11,6 +11,7 @@ import optuna
 import sklearn
 
 from benchforge._version import __version__
+from benchforge.artifacts.manifest import seal
 from benchforge.automl.results import AutoMLResult
 from benchforge.core.config import AutoMLConfig
 from benchforge.storage.search import SearchArtifactStore
@@ -48,6 +49,8 @@ class AutoMLArtifactStore:
                 "scikit_learn_version": sklearn.__version__,
                 "optuna_version": optuna.__version__,
                 "automl_fingerprint": result.fingerprint,
+                "selected_model_identity": result.plan.selected_model_identity,
+                "fingerprint_method": "canonical-metrics-v1",
                 "search_fingerprint": result.search_result.fingerprint,
                 "dataset_identity": result.plan.dataset_identity,
                 "selected_searchable_families": result.plan.searchable_families,
@@ -83,6 +86,7 @@ class AutoMLArtifactStore:
                 "search_artifacts": "search",
             },
         )
+        seal(directory)
         return directory, search_directory
 
 

@@ -92,6 +92,7 @@ def test_automl_artifacts_compose_search_artifacts(tmp_path: Path) -> None:
         "plan.json",
         "generated_search_config.json",
         "metadata.json",
+        "manifest.json",
         "result.json",
         "search",
     }

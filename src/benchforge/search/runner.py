@@ -495,6 +495,7 @@ def run_search(
     )
     result = SearchResult(
         fingerprint=fingerprint,
+        search_space_identity=space_identity,
         dataset=summarize_dataset(dataset),
         primary_metric=config.primary_metric.value,
         optimization_direction=metric_spec(config.primary_metric).direction,

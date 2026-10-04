@@ -3,8 +3,9 @@
 import hashlib
 import json
 import platform
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import version
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -48,6 +49,7 @@ class RobustnessPlan:
     repetitions: tuple[RepetitionPlan, ...]
     approximate_maximum_fits: int
     methodology_version: str = METHODOLOGY_VERSION
+    model_identity: dict[str, Any] = field(default_factory=dict)
 
 
 def build_robustness_plan(
@@ -85,6 +87,7 @@ def build_robustness_plan(
         tuple(sorted(model.id or model.name for model in config.models)),
         tuple(repetitions),
         config.robustness.repetitions * len(config.models) * config.split.n_splits,
+        model_identity=model_registry.identity_for({model.name for model in config.models}),
     )
 
 

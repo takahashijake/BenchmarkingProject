@@ -15,6 +15,7 @@ from benchforge.analysis.summary import (
     format_search_summary,
 )
 from benchforge.automl import build_automl_plan, run_automl
+from benchforge.catalog.cli import add_commands, dispatch
 from benchforge.core.config import (
     load_automl_config,
     load_benchmark_config,
@@ -53,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
         "robustness", help="evaluate stability with repeated matched cross-validation"
     )
     robustness_parser.add_argument("config", help="path to a YAML robustness configuration")
+    add_commands(subparsers)
     return parser
 
 
@@ -60,6 +62,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command in {"verify", "catalog"}:
+            return dispatch(args)
         if args.command == "run":
             result = run_benchmark(load_run_config(args.config))
             summary = format_run_summary(result)
@@ -77,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 summary = format_automl_plan(build_automl_plan(automl_config))
             else:
                 summary = format_automl_summary(run_automl(automl_config))
-    except (ValidationError, ValueError, RuntimeError) as exc:
+    except (ValidationError, ValueError, RuntimeError, OSError) as exc:
         print(f"benchforge: error: {exc}", file=sys.stderr)
         return 2
     print(summary)

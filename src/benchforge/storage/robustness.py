@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from benchforge.artifacts.manifest import seal
 from benchforge.robustness.config import RobustnessConfig
 from benchforge.robustness.planner import dependency_versions
 from benchforge.robustness.results import RobustnessResult
@@ -40,6 +41,7 @@ class RobustnessArtifactStore:
                 "created_at": (created_at or datetime.now(UTC)).isoformat(),
                 "versions": dependency_versions(),
                 "robustness_fingerprint": result.fingerprint,
+                "model_identity": result.plan.model_identity,
                 "dataset_identity": result.dataset.identity,
                 "primary_metric": result.primary_metric,
                 "optimization_direction": result.optimization_direction,
@@ -129,6 +131,7 @@ class RobustnessArtifactStore:
                     )
                     writer.writeheader()
                     writer.writerows(asdict(item) for item in candidate.predictions)
+        seal(directory)
         return directory
 
 

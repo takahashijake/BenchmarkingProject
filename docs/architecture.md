@@ -1,4 +1,4 @@
-# BenchForge V0.7 architecture
+# BenchForge V0.8 architecture
 
 BenchForge separates deterministic policy, search orchestration, fixed comparison, and atomic
 execution:
@@ -188,6 +188,73 @@ identity, output paths, duration, and timestamp are excluded. Reporting lives in
 
 Multiclass ROC-AUC, pruning, multi-objective optimization, arbitrary pipeline generation,
 feature/preprocessing search, pipeline invention, XGBoost, LightGBM, CatBoost, neural networks,
-GPU/distributed scheduling, statistical significance, deployment, persistent
+GPU/distributed scheduling, statistical significance, deployment, remote
 analytics, and web UI remain future work. Outer-fold-driven family racing is explicitly excluded
 because those folds remain unbiased evaluation evidence.
+
+## V0.8 evidence management boundary
+
+`artifacts.types` defines frozen typed descriptors, candidates, evaluation settings and verification
+reports. JSON mappings are confined to the evidence adapter and explicitly polymorphic source/config
+and compact summary fields. A descriptor reports missing historical metadata as unavailable; it does
+not reinterpret missing primary metrics as a scientific selection criterion.
+
+`artifacts.discovery` classifies by configuration-file signatures, detects ambiguous signatures and
+walks deterministically without following symlinks. Recursive discovery emits parent experiments
+once: benchmark `runs/` and AutoML `search/` are owned evidence, not additional top-level discoveries.
+An explicitly supplied child directory can still be verified or indexed separately. Incomplete
+recognized directories remain discoverable, and malformed signatures produce diagnostics.
+
+`artifacts.verify` is read-only and offline. It validates configurations without resolving their
+original data sources, decodes every JSON/CSV member, verifies required topology and redundant
+semantic evidence, and verifies manifests independently of semantic parsing. Hash diagnostics remain
+available even if altered JSON cannot decode. Deep verification reconstructs scores and robustness
+analysis using the existing metric/statistics primitives; it never fits estimators. Unstored trial
+split evidence, missing historical fingerprint inputs, authenticity and source-data provenance are
+outside its guarantees.
+
+`artifacts.manifest` implements schema 1 with an ordered relative-path inventory and per-file SHA-256.
+The protection policy covers every regular file except the root manifest, including nested seals;
+there is no circular hashing. All five stores call this one writer after writing evidence. Exclusive
+manifest creation prevents accidental re-sealing. If evidence writing or checking fails, the original
+exception retains context and no valid manifest claims a complete experiment. Partially written
+unsealed output can remain for diagnosis. This is a completion marker, not a filesystem-wide atomic
+rename or a signed attestation.
+
+`catalog.database` uses standard-library SQLite, schema `user_version=1`, foreign keys, uniqueness
+constraints and explicit transactions. Tables are `experiments`, `artifact_locations`, `candidates`,
+`metrics` and append-only `verification_records`. Experiment identity is `(artifact_type,
+experiment_fingerprint)`; its portable ID hashes those two fields. Each location retains a normalized
+snapshot and independent observations plus a byte inventory digest. SQLite holds compact summaries,
+not prediction CSVs or trial histories. Verification timestamps are audit metadata outside identity.
+
+Ingestion verifies the entire batch before opening a write transaction, checks the byte snapshot
+again to detect concurrent changes during verification, and commits or rolls back the whole batch.
+Unchanged locations do not duplicate any rows. New copies attach to the existing experiment;
+conflicting semantics under an existing identity fail instead of silently merging. The catalog treats
+locations as immutable and rejects replacement evidence. Local filesystem writes cannot be locked
+by SQLite; concurrent changes after the snapshot require fresh verification. Read views label their
+last verification as historical. `catalog verify` appends fresh verification records; comparison
+verifies first and refuses corrupted or unavailable locations.
+
+`catalog.compare` compares workflow, dataset identity, task, metric/direction and typed evaluation
+settings including actual fold-assignment digests where available. Methodology/version/fold/candidate
+pool differences and incomplete measurements are explicitly partial compatibility. Candidate-family
+or mode substitutions do not produce a numeric difference. Rankings always refer to their recorded
+candidate pool. Multiple locations with different outcomes are retained separately; the current CLI
+uses the first location in deterministic path order and reports that choice. No significance test is
+introduced. `catalog.cli` handles parsing and formatting; storage, verification, indexing and
+comparison remain independently usable Python APIs.
+
+The unresolved `RunConfig.fingerprint` API is unchanged. Persisted runs now use
+`fingerprint_for_dataset()` with a recorded `resolved-run-v1` method. Benchmark/search/AutoML
+canonicalize metric ordering with a recorded `canonical-metrics-v1` method. Verification retains the
+legacy run/benchmark algorithms; historic search/AutoML/robustness artifacts lacking identity inputs
+are read without guessing current registry definitions. New search, AutoML and robustness stores
+persist the registry identity inputs used during execution so fingerprints can be checked offline.
+
+CI validates Python 3.12 and 3.13 with pytest, Ruff and strict mypy. Tests use offline datasets and
+cover current/legacy formats, protected-member mutations, missing nested evidence, rollback,
+idempotency, relocation, schema rejection, metric orientation and conservative comparisons. Existing
+fold-local preprocessing, nested-validation isolation and matched-robustness leakage tests remain
+part of the default suite.

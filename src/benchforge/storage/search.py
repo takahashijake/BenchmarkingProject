@@ -12,6 +12,7 @@ import optuna
 import sklearn
 
 from benchforge._version import __version__
+from benchforge.artifacts.manifest import seal
 from benchforge.core.config import SearchConfig
 from benchforge.search.results import SearchResult, TrialRecord
 
@@ -46,6 +47,8 @@ class SearchArtifactStore:
                 "scikit_learn_version": sklearn.__version__,
                 "optuna_version": optuna.__version__,
                 "search_fingerprint": result.fingerprint,
+                "search_space_identity": result.search_space_identity,
+                "fingerprint_method": "canonical-metrics-v1",
                 "dataset_identity": result.dataset.identity,
                 "seed": config.seed,
                 "primary_metric": result.primary_metric,
@@ -146,6 +149,7 @@ class SearchArtifactStore:
                 [asdict(trial) for trial in failure.trials],
             )
             _write_trials_csv(family_directory / "trials.csv", failure.trials)
+        seal(directory)
         return directory
 
 

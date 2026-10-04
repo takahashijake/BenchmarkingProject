@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import sklearn
 
 from benchforge._version import __version__
+from benchforge.artifacts.manifest import seal
 from benchforge.core.config import RunConfig
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ class LocalArtifactStore:
             "dataset_identity": result.dataset_identity,
             "dataset_summary": asdict(result.dataset),
             "config_fingerprint": result.fingerprint,
+            "fingerprint_method": "resolved-run-v1",
             "seed": result.seed,
         }
         metadata.update(metadata_extra or {})
@@ -65,6 +67,7 @@ class LocalArtifactStore:
             )
             writer.writeheader()
             writer.writerows(asdict(prediction) for prediction in result.predictions)
+        seal(directory)
         return directory
 
     @staticmethod

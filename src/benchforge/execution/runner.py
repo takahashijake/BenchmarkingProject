@@ -181,7 +181,7 @@ def run_benchmark(
         predictions.extend(fold_predictions)
 
     result = RunResult(
-        fingerprint=config.fingerprint,
+        fingerprint=config.fingerprint_for_dataset(dataset.identity),
         dataset_identity=dataset.identity,
         dataset=summarize_dataset(dataset),
         model_name=config.model.name,

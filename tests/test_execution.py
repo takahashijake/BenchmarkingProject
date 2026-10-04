@@ -66,6 +66,7 @@ def test_artifacts_are_persisted_and_readable(example_config: RunConfig, tmp_pat
         "fold_metrics.json",
         "aggregate_metrics.json",
         "predictions.csv",
+        "manifest.json",
     }
     assert {path.name for path in result.artifact_directory.iterdir()} == expected
     artifacts = read_run_artifacts(result.artifact_directory)

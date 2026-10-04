@@ -3,7 +3,7 @@
 BenchForge is reproducible benchmarking infrastructure for classical machine learning. It turns a
 strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
-BenchForge V0.7 supports binary classification, multiclass classification, and regression through
+BenchForge V0.8 supports binary classification, multiclass classification, and regression through
 five workflow levels:
 
 - `benchforge run`: execute one concrete pipeline.
@@ -160,6 +160,7 @@ Robustness artifacts have their own schema version 1:
 
 ```text
 artifacts/robustness_<UTC timestamp>_<fingerprint>/
+├── manifest.json
 ├── robustness_config.json
 ├── metadata.json
 ├── dataset_summary.json
@@ -370,6 +371,7 @@ Single-run and fixed-benchmark artifact formats remain compatible with V0/V0.2. 
 
 ```text
 artifacts/search_<UTC timestamp>_<fingerprint>/
+├── manifest.json
 ├── search_config.json
 ├── metadata.json
 ├── dataset_summary.json
@@ -420,3 +422,87 @@ multi-objective search, arbitrary pipelines, feature-selection or preprocessing 
 LightGBM, CatBoost, neural networks, GPUs, distributed workers, statistical
 significance testing, a persistent analytics catalog, model deployment, or a web UI. Adaptive
 racing may be considered only if it can operate wholly inside outer-training partitions.
+
+## V0.8: persistent experiment catalog and artifact verification
+
+The local catalog indexes immutable experiment evidence; it does not replace artifact directories.
+Keep those directories available. SQLite stores identities, candidate/metric summaries, physical
+locations and verification records, rather than predictions or trial histories. No database server
+or training is needed to browse or verify evidence.
+
+```bash
+benchforge search configs/examples/breast_cancer_search.yaml
+benchforge robustness configs/examples/breast_cancer_robustness.yaml
+
+# Use the actual artifact directory printed by each command.
+benchforge verify artifacts/search_<timestamp>_<fingerprint> --deep
+benchforge verify artifacts/robustness_<timestamp>_<fingerprint> --json
+benchforge catalog ingest artifacts/
+benchforge catalog list --type search
+benchforge catalog list --task regression --metric root_mean_squared_error
+benchforge catalog show <experiment-id>
+benchforge catalog verify <experiment-id> --deep
+benchforge catalog compare <experiment-id-a> <experiment-id-b> --json
+```
+
+The default database is `.benchforge/catalog.sqlite3` relative to the current directory. Override it
+with `benchforge catalog --database /path/history.sqlite3 list` (the option also works after the
+catalog action). Experiment IDs are stable SHA-256 identifiers of workflow type plus semantic
+fingerprint; an unambiguous ID prefix works for `show`, `verify` and `compare`. Filters for `list`
+are `--type`, `--task`, `--dataset` (exact persisted dataset identity), `--metric`, and `--status`.
+All new commands support `--json`; historical queries use stable ordering. `show` and `list` display
+the **last recorded** verification, while `catalog verify` performs a fresh check of every copy.
+
+**Semantic fingerprint:** “Are these experiment semantics the same?” It excludes artifact output
+paths, source paths superseded by content identity, timestamps, runtime and metric presentation
+ordering. Built-in datasets retain their versioned sklearn identities; local files retain their
+content-based identities. `RunConfig.fingerprint` remains the unresolved configuration identity
+for API compatibility; V0.8 `RunResult.fingerprint` uses resolved dataset identity. Benchmark,
+search and AutoML fingerprints now ignore metric order. Old fingerprints are preserved when reading
+historical evidence; the catalog does not retroactively merge different fingerprint algorithms.
+
+**Artifact manifest:** “Are these persisted bytes the evidence that was originally sealed?” Every
+new experiment has `manifest.json`, written last after structural/semantic checks. Manifest schema 1
+protects **every regular file recursively**, including child manifests, except the experiment's own
+root manifest. Paths are relative, inventories are ordered, and each file has a SHA-256 digest. The
+manifest includes the existing semantic fingerprint; file hashes do not redefine that fingerprint.
+Runtime metadata is protected evidence but does not affect semantic identity. Copies retain their
+identity and seal. Symlinks and non-regular members are rejected. A manifest detects byte changes
+relative to its seal; it is not a signed provenance attestation against someone rewriting both
+files and manifest.
+
+Verification checks required files, JSON/CSV structure, supported schema versions, configured
+candidate coverage, failure records, metric direction, aggregate consistency and nested evidence.
+It checks fold membership and inner/outer split separation when indices are stored. `--deep` also
+recomputes fold scores from predictions and robustness bootstrap summaries without retraining.
+Verification prints `PASS`, `WARNING` or `FAIL` diagnostics. Warnings alone exit 0; verification
+failures exit 2 and identify changed/missing files. An incomplete writer cannot publish a valid seal.
+A V0.8 directory missing its required manifest fails verification.
+
+Pre-V0.8 artifacts remain readable and catalogable. They report **legacy/unsealed**, with a warning
+that cryptographic integrity cannot be established. Structural and redundant semantic evidence can
+still be checked; historical search-space/model identity inputs that were never persisted cannot
+be reconstructed authoritatively. Ingestion establishes an additional byte snapshot, so subsequent
+catalog verification detects changes to indexed legacy evidence too.
+
+Ingestion verifies the full batch deeply, then commits it in one transaction. Repeating ingestion
+is idempotent. Copies or reproductions with the same workflow and fingerprint map to one experiment
+with multiple locations; observations remain specific to each location. Conflicting semantics under
+one fingerprint are an explicit identity-collision error, including legacy run fingerprints that
+omitted dataset content. Altering evidence at an indexed location is an error: preserve the original
+and ingest a new location. Moving a directory retains identity, but the old catalog location remains
+visible as unavailable until evidence is restored there; V0.8 does not silently rewrite history.
+
+Historical comparison classifies evidence as **compatible**, **partially compatible** or
+**incompatible**. Different tasks, dataset identities, primary metrics/directions or workflows are
+incompatible. Different evaluation settings, stored fold assignments, versions, candidate pools or
+missing/failed observations are partial compatibility. Only shared candidate identifiers with the
+same family and mode receive descriptive metric/rank/parameter differences. Runs have no declared
+primary metric and therefore have limited comparison support. Error metrics keep natural values;
+the oriented B-minus-A difference is positive when B has the better measured score.
+
+Comparison freshly verifies all copies first. It reports the selected locations explicitly and
+flags replicas with differing measured observations. JSON output includes compact final-selection
+or robustness summaries. Aggregate CV means are **not independent hypothesis-test samples**. A
+historical difference does not establish statistical significance, population superiority or a
+winning deployment choice. Unavailable measurements remain unavailable.

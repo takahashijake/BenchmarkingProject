@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from benchforge.core.config import (
@@ -36,6 +36,7 @@ class AutoMLPlan:
     approximate_maximum_fits: int
     search_fingerprint: str
     search_config: SearchConfig
+    selected_model_identity: dict[str, Any] = field(default_factory=dict)
 
     def canonical_dict(self) -> dict[str, Any]:
         return {
@@ -205,4 +206,5 @@ def build_automl_plan(
         approximate_maximum_fits=fit_count,
         search_fingerprint=search_fingerprint,
         search_config=generated,
+        selected_model_identity=selected_identity,
     )

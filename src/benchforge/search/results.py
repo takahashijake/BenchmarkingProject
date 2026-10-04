@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from benchforge.core.config import JsonScalar, SearchModelConfig
 from benchforge.data.registry import DatasetSummary
@@ -115,3 +116,4 @@ class SearchResult:
     final_candidate: FinalCandidate | None
     total_duration_seconds: float
     artifact_directory: Path | None = None
+    search_space_identity: dict[str, Any] = field(default_factory=dict)

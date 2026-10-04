@@ -229,6 +229,7 @@ def test_search_artifacts_are_auditable_and_readable(tmp_path: Path) -> None:
     expected = {
         "search_config.json",
         "metadata.json",
+        "manifest.json",
         "dataset_summary.json",
         "tuned_leaderboard.json",
         "tuned_leaderboard.csv",

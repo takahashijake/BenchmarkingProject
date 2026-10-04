@@ -74,6 +74,7 @@ def test_suite_artifacts_are_written_and_readable(tmp_path: Path) -> None:
     expected = {
         "benchmark_config.json",
         "metadata.json",
+        "manifest.json",
         "leaderboard.json",
         "leaderboard.csv",
         "failures.json",

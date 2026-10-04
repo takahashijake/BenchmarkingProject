@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import sklearn
 
 from benchforge._version import __version__
+from benchforge.artifacts.manifest import seal
 from benchforge.core.config import BenchmarkConfig
 from benchforge.storage.local import LocalArtifactStore
 
@@ -36,6 +37,7 @@ class BenchmarkArtifactStore:
                 "python_version": platform.python_version(),
                 "scikit_learn_version": sklearn.__version__,
                 "benchmark_fingerprint": result.fingerprint,
+                "fingerprint_method": "canonical-metrics-v1",
                 "dataset_identity": result.dataset.identity,
                 "seed": config.seed,
                 "primary_metric": result.primary_metric,
@@ -65,6 +67,7 @@ class BenchmarkArtifactStore:
                     "benchmark_fingerprint": result.fingerprint,
                 },
             )
+        seal(directory)
         return directory
 
 

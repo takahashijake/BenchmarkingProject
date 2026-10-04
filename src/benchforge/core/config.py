@@ -147,6 +147,20 @@ class RunConfig(StrictModel):
         """Stable identity of experiment semantics; artifact location is excluded."""
         return hashlib.sha256(self.canonical_json(include_output=False).encode()).hexdigest()
 
+    def fingerprint_for_dataset(self, dataset_identity: str) -> str:
+        """Resolved persisted identity; config.fingerprint remains the unresolved API."""
+        semantics = self.canonical_dict(include_output=False)
+        semantics["metrics"] = sorted(semantics["metrics"])
+        if "source" in semantics["dataset"]:
+            semantics["dataset"].pop("path", None)
+        payload = {
+            "run": semantics,
+            "resolved_dataset_identity": dataset_identity,
+            "fingerprint_method": "resolved-run-v1",
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
 
 def load_run_config(path: str | Path) -> RunConfig:
     config_path = Path(path)
@@ -231,6 +245,7 @@ class BenchmarkConfig(StrictModel):
 
     def fingerprint_for_dataset(self, dataset_identity: str) -> str:
         benchmark_semantics = self.canonical_dict(include_output=False)
+        benchmark_semantics["metrics"] = sorted(benchmark_semantics["metrics"])
         dataset_semantics = benchmark_semantics["dataset"]
         if isinstance(dataset_semantics, dict) and "source" in dataset_semantics:
             dataset_semantics.pop("path", None)
@@ -384,6 +399,7 @@ class SearchConfig(StrictModel):
         self, dataset_identity: str, search_space_identity: dict[str, Any] | str
     ) -> str:
         search_semantics = self.canonical_dict(include_output=False)
+        search_semantics["metrics"] = sorted(search_semantics["metrics"])
         dataset_semantics = search_semantics["dataset"]
         if isinstance(dataset_semantics, dict) and "source" in dataset_semantics:
             dataset_semantics.pop("path", None)
@@ -490,6 +506,7 @@ class AutoMLConfig(StrictModel):
         search_fingerprint: str,
     ) -> str:
         policy = self.canonical_dict(include_output=False)
+        policy["metrics"] = sorted(policy["metrics"])
         dataset_semantics = policy["dataset"]
         if isinstance(dataset_semantics, dict) and "source" in dataset_semantics:
             dataset_semantics.pop("path", None)
