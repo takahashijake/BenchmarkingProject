@@ -8,6 +8,8 @@ from benchforge.storage.suite import BenchmarkArtifactStore, read_benchmark_arti
 __all__ = [
     "BenchmarkArtifactStore",
     "AutoMLArtifactStore",
+    "RobustnessArtifactStore",
+    "read_robustness_artifacts",
     "LocalArtifactStore",
     "SearchArtifactStore",
     "read_benchmark_artifacts",
@@ -18,6 +20,13 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
+    if name in {"RobustnessArtifactStore", "read_robustness_artifacts"}:
+        from benchforge.storage.robustness import RobustnessArtifactStore, read_robustness_artifacts
+
+        return {
+            "RobustnessArtifactStore": RobustnessArtifactStore,
+            "read_robustness_artifacts": read_robustness_artifacts,
+        }[name]
     if name in {"AutoMLArtifactStore", "read_automl_artifacts"}:
         from benchforge.storage.automl import AutoMLArtifactStore, read_automl_artifacts
 

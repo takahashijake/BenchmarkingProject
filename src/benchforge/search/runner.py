@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import replace
 from time import perf_counter
 
@@ -14,6 +12,7 @@ from benchforge.core.config import (
     SearchModelConfig,
     TaskType,
 )
+from benchforge.core.seeds import derive_seed as derive_seed
 from benchforge.data.registry import (
     Dataset,
     DatasetRegistry,
@@ -54,11 +53,6 @@ class FamilySearchError(RuntimeError):
         super().__init__(message)
         self.trials = trials
         self.configured_trials = configured_trials
-
-
-def derive_seed(seed: int, *parts: object) -> int:
-    payload = json.dumps([seed, *parts], sort_keys=True, separators=(",", ":"))
-    return int.from_bytes(hashlib.sha256(payload.encode()).digest()[:4], "big")
 
 
 def _parameters(

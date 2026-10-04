@@ -1,0 +1,13 @@
+schema_version: 1
+task: regression
+dataset: {name: diabetes}
+split: {strategy: kfold, n_splits: 3, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+models:
+  - {name: ridge_regressor, id: ridge, parameters: {alpha: 1.0}}
+  - {name: dummy_regressor, id: dummy}
+metrics: [root_mean_squared_error, mean_absolute_error, r2]
+primary_metric: root_mean_squared_error
+robustness: {repetitions: 5, confidence_level: 0.95, bootstrap_samples: 2000}
+seed: 42
+output: {directory: artifacts}

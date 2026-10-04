@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from pydantic import ValidationError
 
+from benchforge.analysis.robustness import format_robustness_summary
 from benchforge.analysis.summary import (
     format_automl_plan,
     format_automl_summary,
@@ -22,6 +23,7 @@ from benchforge.core.config import (
 )
 from benchforge.execution.benchmark import run_benchmark_suite
 from benchforge.execution.runner import run_benchmark
+from benchforge.robustness import load_robustness_config, run_robustness
 from benchforge.search.runner import run_search
 
 
@@ -47,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
     automl_parser.add_argument(
         "--plan-only", action="store_true", help="print the deterministic plan without training"
     )
+    robustness_parser = subparsers.add_parser(
+        "robustness", help="evaluate stability with repeated matched cross-validation"
+    )
+    robustness_parser.add_argument("config", help="path to a YAML robustness configuration")
     return parser
 
 
@@ -63,6 +69,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "search":
             search_result = run_search(load_search_config(args.config))
             summary = format_search_summary(search_result)
+        elif args.command == "robustness":
+            summary = format_robustness_summary(run_robustness(load_robustness_config(args.config)))
         else:
             automl_config = load_automl_config(args.config)
             if args.plan_only:

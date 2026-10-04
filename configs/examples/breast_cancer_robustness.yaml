@@ -1,0 +1,14 @@
+schema_version: 1
+task: binary_classification
+dataset: {name: breast_cancer}
+split: {strategy: stratified_kfold, n_splits: 3, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+models:
+  - {name: logistic_regression, id: logistic, parameters: {max_iter: 1000}}
+  - {name: random_forest_classifier, id: forest, parameters: {n_estimators: 40}}
+  - {name: extra_trees_classifier, id: extra_trees, parameters: {n_estimators: 40}}
+metrics: [roc_auc, balanced_accuracy, f1]
+primary_metric: roc_auc
+robustness: {repetitions: 5, confidence_level: 0.95, bootstrap_samples: 2000}
+seed: 42
+output: {directory: artifacts}

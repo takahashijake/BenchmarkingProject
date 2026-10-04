@@ -3,13 +3,15 @@
 BenchForge is reproducible benchmarking infrastructure for classical machine learning. It turns a
 strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
-BenchForge V0.6 supports binary classification, multiclass classification, and regression through
-four workflow levels:
+BenchForge V0.7 supports binary classification, multiclass classification, and regression through
+five workflow levels:
 
 - `benchforge run`: execute one concrete pipeline.
 - `benchforge benchmark`: compare several concrete pipelines on shared folds.
 - `benchforge search`: tune several model families under a finite budget and compare the tuning
   procedures using untouched, shared outer folds.
+- `benchforge robustness`: assess fixed candidates with repeated matched CV, paired effects,
+  and ranking stability.
 - `benchforge automl`: deterministically choose supported families and translate a global trial
   budget into an ordinary nested-search configuration.
 
@@ -42,12 +44,151 @@ benchforge automl configs/examples/breast_cancer_automl.yaml --plan-only
 benchforge automl configs/examples/breast_cancer_automl.yaml
 benchforge automl configs/examples/diabetes_regression_automl.yaml
 benchforge run configs/examples/rental_prices_regression_run.yaml
+benchforge robustness configs/examples/breast_cancer_robustness.yaml
+benchforge robustness configs/examples/iris_multiclass_robustness.yaml
+benchforge robustness configs/examples/diabetes_regression_robustness.yaml
 ```
 
 The Python API exposes `load_run_config()` / `run_benchmark()`,
 `load_benchmark_config()` / `run_benchmark_suite()`, and
 `load_search_config()` / `run_search()`, and
-`load_automl_config()` / `build_automl_plan()` / `run_automl()`.
+`load_automl_config()` / `build_automl_plan()` / `run_automl()`, plus
+`load_robustness_config()` / `run_robustness()`.
+
+## Robustness: how stable is the comparison?
+
+A single cross-validation score depends on the fold assignment and estimator randomness. A small
+lead in one benchmark may reverse when those change. V0.7 compares **fixed candidate
+configurations** in repeated matched CV: each repetition gets a new deterministic fold seed,
+all candidates receive that exact fold plan, and the existing fold kernel fits a fresh pipeline
+using training rows only. There is no tuning or adaptive candidate selection in this workflow.
+
+```yaml
+schema_version: 1
+task: binary_classification
+dataset: {name: breast_cancer}
+split: {strategy: stratified_kfold, n_splits: 3, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+models:
+  - {name: logistic_regression, id: logistic, parameters: {max_iter: 1000}}
+  - {name: random_forest_classifier, id: forest, parameters: {n_estimators: 40}}
+metrics: [roc_auc, balanced_accuracy, f1]
+primary_metric: roc_auc
+robustness:
+  repetitions: 5
+  confidence_level: 0.95
+  bootstrap_samples: 2000
+seed: 42
+output: {directory: artifacts}
+```
+
+```bash
+benchforge robustness configs/examples/breast_cancer_robustness.yaml
+```
+
+```python
+from benchforge import load_robustness_config, run_robustness
+
+result = run_robustness(load_robustness_config("robustness.yaml"))
+print(result.leaderboard)
+print(result.pairwise_comparisons)
+print(result.rank_stability)
+```
+
+The examples use five repetitions so they are inexpensive demonstrations. Increase `repetitions`
+(for example to 20 or 50) for a more informative assessment. Execution is sequential. Its
+approximate maximum fit count is **repetitions × candidates × folds**: the three-candidate Breast
+Cancer example requires 45 fits. Increasing bootstrap samples does not fit additional estimators.
+Classification uses `stratified_kfold`; regression uses `kfold`. Metrics retain existing names,
+including `root_mean_squared_error` and `mean_absolute_error` rather than RMSE/MAE aliases.
+Multiclass predictions keep the existing absent scalar `score` convention.
+
+Each candidate's repetition score is the ordinary unweighted mean of its fold metrics. Its
+robustness score is the mean across completed repetition scores. The reported standard deviation
+is the **sample standard deviation across repetitions**, distinct from fold-score variability.
+All robustness summary standard deviations use `ddof=1`; a single available observation has a
+descriptive standard deviation of zero, with its count always visible.
+
+Every unordered candidate pair has explicit paired evidence. `raw_paired_deltas` records
+A minus B in natural metric units. `paired_deltas` reverses that sign for minimized metrics:
+**positive always means A performed better than B**, and negative means B performed better.
+Win rates count strictly positive/negative deltas; exact zero is a tie. Comparisons use only
+repetitions where both candidates completed all folds, and retain the usable repetition IDs.
+
+The robustness interval is a deterministic **percentile bootstrap of the mean paired delta**:
+resample complete repetition-level deltas with replacement, calculate each resampled mean, and
+use the two equal-tail quantiles at the configured confidence level. NumPy PCG64 uses a
+SHA-256-derived pair-specific seed; linear quantiles and the sample count are versioned semantics.
+`bootstrap_samples` defaults to 2,000 and accepts 100–100,000. Temporary sampling arrays are
+batched. Fewer than two pairs produces an unavailable interval, not an invented bound.
+
+An interval such as mean delta `+0.008`, 95% robustness interval `[-0.002, +0.017]` indicates
+that the apparent advantage is sensitive to this resampling experiment. These intervals describe
+**fold and estimator randomness conditional on the observed dataset**. Repetitions reuse rows;
+they are not independent datasets. They do not estimate population uncertainty, prove superiority,
+or establish statistical significance. BenchForge performs no p-value or fold-level hypothesis
+test. A zero-crossing interval alone also does not establish practical equivalence; that would
+require a task-specific effect threshold, which V0.7 does not define.
+
+Rank stability summarizes competition ranks per repetition: exact ties share rank (for example
+`1, 1, 3`). Identifiers only order presentation, never break a measured tie. Mean/median rank,
+rank standard deviation, best/worst rank, first-place and top-two counts/rates, and full rank
+frequencies are exposed. First-place and top-two rates use **all configured repetitions** as the
+denominator, including failures; tied candidates can each count as first, so first-place rates
+need not sum to one. Mean ranks use the repetitions where that candidate was ranked. Top-two is
+reported even with two candidates, when it is simply an availability measure.
+
+The leaderboard puts fully completed candidates before partial candidates, followed by candidates
+that never completed a repetition. Within each group it orders by primary-metric mean in the
+metric's optimization direction, then identifier. The highest mean score, highest first-place
+rate, and lowest rank variability describe different properties; none proves a definitive winner.
+The report gives paired evidence for every pair and conservative interpretations. A “consistent
+advantage” description requires at least 90% strict wins and an interval entirely on that
+candidate's side of zero; this reporting heuristic is not a hypothesis test. Exact all-repetition
+ties are reported as no measured separation.
+
+A failed candidate stops its current repetition at the failing fold; other candidates and later
+repetitions continue. Completed fold metrics/predictions, the failed fold, skipped folds, and
+exception details are retained. Incomplete repetitions do not contribute aggregate scores or
+paired effects. Ranks compare the available successful candidates, which may bias comparisons
+when failures occur; the report flags this. Even pairs with zero observations remain present.
+If every candidate fails every repetition, artifacts are written before
+`RobustnessExecutionError` is raised; its `.result` preserves all evidence and the artifact path.
+The CLI exits with code 2 in that case. Partial runs report their failures and exit successfully.
+
+Robustness artifacts have their own schema version 1:
+
+```text
+artifacts/robustness_<UTC timestamp>_<fingerprint>/
+├── robustness_config.json
+├── metadata.json
+├── dataset_summary.json
+├── repetition_plan.json
+├── robustness_leaderboard.json / .csv
+├── pairwise_comparisons.json
+├── rank_stability.json
+├── failures.json
+└── repetitions/repetition_000/
+    ├── split_plan.json
+    ├── metrics.json
+    ├── ranks.json
+    └── candidates/<identifier>/
+        ├── summary.json  # includes partial fold evidence and failure details
+        └── predictions.csv
+```
+
+`benchforge.storage.read_robustness_artifacts()` reads the complete experiment, including failed
+summaries and partial predictions. Fold assignments, repetition metrics, paired deltas, bootstrap
+seeds/settings, and ranks are sufficient to reconstruct every reported comparison.
+
+The robustness fingerprint includes content-addressed dataset identity, fixed candidates,
+preprocessing, split/metric/primary-metric settings, repetitions, confidence/bootstrap settings,
+seed, methodology version, model capabilities, and relevant dependency versions. Candidate and
+metric ordering, output location, source paths superseded by content identity, timestamps, and
+runtime do not affect identity. Repetition folds and predictions reproduce for the same content,
+configuration, versions, and seed. Changing the fold seed does not guarantee a different partition
+on a tiny dataset, though repetition seeds are distinct. Stochastic estimators also receive
+candidate/repetition-specific seeds, so this experiment measures both sources of randomness.
 
 ## AutoML configuration and policy
 
@@ -189,7 +330,7 @@ Regression, Random Forest, Extra Trees, Histogram Gradient Boosting, and DummyCl
 Binary metrics are ROC-AUC, F1, accuracy, and balanced accuracy. Multiclass metrics are macro F1,
 accuracy, and balanced accuracy. All classification metrics are maximized. Binary `f1` keeps its
 positive-class semantics; multiclass uses the explicit `f1_macro` metric. Multiclass ROC-AUC is not
-implemented in V0.6, and multiclass prediction artifacts intentionally leave the scalar `score`
+implemented in V0.7, and multiclass prediction artifacts intentionally leave the scalar `score`
 field empty.
 
 Regression uses shuffled deterministic K-fold and supports Linear Regression, Ridge, Random
@@ -273,9 +414,9 @@ See [the architecture document](docs/architecture.md) for dependency boundaries.
 
 ## Current limitations and roadmap
 
-V0.6 search and AutoML are single-process. AutoML does not invent pipelines or adapt family budgets
+V0.7 search and AutoML are single-process. AutoML does not invent pipelines or adapt family budgets
 from outer-fold evidence. BenchForge does not implement multiclass ROC-AUC, pruning,
 multi-objective search, arbitrary pipelines, feature-selection or preprocessing search, XGBoost,
-LightGBM, CatBoost, neural networks, GPUs, distributed workers, robustness suites, statistical
+LightGBM, CatBoost, neural networks, GPUs, distributed workers, statistical
 significance testing, a persistent analytics catalog, model deployment, or a web UI. Adaptive
 racing may be considered only if it can operate wholly inside outer-training partitions.

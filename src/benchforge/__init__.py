@@ -14,6 +14,12 @@ from benchforge.core.config import (
 )
 from benchforge.execution.benchmark import BenchmarkResult, run_benchmark_suite
 from benchforge.execution.runner import RunResult, run_benchmark
+from benchforge.robustness import (
+    RobustnessConfig,
+    RobustnessResult,
+    load_robustness_config,
+    run_robustness,
+)
 from benchforge.search import SearchResult, run_search
 
 __all__ = [
@@ -22,6 +28,10 @@ __all__ = [
     "AutoMLResult",
     "BenchmarkConfig",
     "BenchmarkResult",
+    "RobustnessConfig",
+    "RobustnessResult",
+    "load_robustness_config",
+    "run_robustness",
     "RunConfig",
     "RunResult",
     "SearchConfig",
