@@ -24,6 +24,17 @@ class SearchArtifactStore:
         timestamp = datetime.now(UTC)
         name = f"search_{timestamp.strftime('%Y%m%dT%H%M%S.%fZ')}_{result.fingerprint[:12]}"
         directory = self.root / name
+        return self.write_at(directory, config, result, created_at=timestamp)
+
+    def write_at(
+        self,
+        directory: Path,
+        config: SearchConfig,
+        result: SearchResult,
+        *,
+        created_at: datetime | None = None,
+    ) -> Path:
+        timestamp = created_at or datetime.now(UTC)
         directory.mkdir(parents=True, exist_ok=False)
         _write_json(directory / "search_config.json", config.canonical_dict())
         _write_json(

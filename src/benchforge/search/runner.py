@@ -421,10 +421,11 @@ def run_search(
     model_registry: ModelRegistry = default_model_registry,
     search_space_registry: SearchSpaceRegistry = default_search_space_registry,
     persist: bool = True,
+    dataset: Dataset | None = None,
 ) -> SearchResult:
     """Tune families inside outer training partitions and rank outer-fold evidence only."""
     started = perf_counter()
-    dataset = dataset_registry.resolve(config.dataset)
+    dataset = dataset or dataset_registry.resolve(config.dataset)
     if dataset.task != config.task:
         raise ValueError(
             f"dataset task '{dataset.task}' does not match configured task '{config.task}'"

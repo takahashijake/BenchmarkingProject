@@ -7,15 +7,24 @@ from benchforge.storage.suite import BenchmarkArtifactStore, read_benchmark_arti
 
 __all__ = [
     "BenchmarkArtifactStore",
+    "AutoMLArtifactStore",
     "LocalArtifactStore",
     "SearchArtifactStore",
     "read_benchmark_artifacts",
+    "read_automl_artifacts",
     "read_run_artifacts",
     "read_search_artifacts",
 ]
 
 
 def __getattr__(name: str) -> Any:
+    if name in {"AutoMLArtifactStore", "read_automl_artifacts"}:
+        from benchforge.storage.automl import AutoMLArtifactStore, read_automl_artifacts
+
+        return {
+            "AutoMLArtifactStore": AutoMLArtifactStore,
+            "read_automl_artifacts": read_automl_artifacts,
+        }[name]
     if name in {"SearchArtifactStore", "read_search_artifacts"}:
         from benchforge.storage.search import SearchArtifactStore, read_search_artifacts
 

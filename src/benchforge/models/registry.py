@@ -120,6 +120,17 @@ class ModelRegistry:
     def task(self, name: str) -> TaskType:
         return self._resolve(name).task
 
+    def identity_for(self, model_names: set[str]) -> dict[str, Any]:
+        return {
+            name: {
+                "task": self.task(name).value,
+                "capabilities": {
+                    "requires_dense": self.capabilities(name).requires_dense,
+                },
+            }
+            for name in sorted(model_names)
+        }
+
     def _resolve(self, name: str) -> ModelSpec:
         try:
             return self._specs[name]

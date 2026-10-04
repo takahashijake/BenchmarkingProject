@@ -1,23 +1,31 @@
-# BenchForge V0.4 architecture
+# BenchForge V0.5 architecture
 
-BenchForge separates atomic execution, fixed comparison, and search orchestration:
+BenchForge separates deterministic policy, search orchestration, fixed comparison, and atomic
+execution:
 
 ```text
 CLI
-├── run ─────────────────────────────────────────┐
-├── benchmark -> fixed candidate orchestration ──┤
-└── search -> nested-search orchestration         │
-             ├── one shared outer fold plan      │
-             ├── inner Optuna studies ───────────┤
-             ├── selected outer refits ──────────┤
-             └── optional final full-data search │
-                                                 v
-                                      experiment kernel
-                                      ├── fresh preprocessor
-                                      ├── fresh estimator
-                                      ├── fit training rows only
-                                      ├── evaluate validation rows
-                                      └── return fold evidence
+├── run
+├── benchmark
+├── search
+└── automl
+      ↓
+  deterministic policy/planner
+      ↓
+  generated SearchConfig
+      ↓
+  existing nested-search orchestration
+      ├── one shared outer fold plan
+      ├── inner Optuna studies
+      ├── selected outer refits
+      └── optional final full-data search
+          ↓
+      experiment kernel
+      ├── fresh preprocessor
+      ├── fresh estimator
+      ├── fit training rows only
+      ├── evaluate validation rows
+      └── return fold evidence
 ```
 
 `run_benchmark()` remains the atomic CV execution unit and retains the V0 API. It may resolve its
@@ -28,7 +36,9 @@ there are no separate classification and regression runners.
 
 ## Dependency boundaries
 
-- `core` owns strict run, benchmark, and search configurations and semantic serialization.
+- `core` owns strict run, benchmark, search, and AutoML configurations and semantic serialization.
+- `automl` owns registry-driven candidate policy, deterministic budget allocation, and delegation
+  to the search layer. It owns no fitting, scoring, splitting, preprocessing, or ranking logic.
 - `data` owns built-in/file loading, validation, schema inference, and content identity.
 - `splits` owns task-aware deterministic flat and nested fold plans in original dataset index
   space: stratified K-fold for binary classification and K-fold for regression.
@@ -94,13 +104,27 @@ and timestamp fields are not deterministic.
 
 Artifacts preserve shared outer folds, every nested split plan, complete/failed/pruned trial
 records, selected inner parameters/scores, outer metrics and predictions, aggregate family
-evidence, and optional final selection. JSON/CSV is sufficient for V0.4; no Optuna database is
-required.
+evidence, and optional final selection. JSON/CSV is sufficient for V0.5; no Optuna database is
+required. AutoML adds a policy/config/plan wrapper and nests the unchanged search artifact format
+under `search/`.
+
+## AutoML planning boundary
+
+The AutoML planner intersects task-compatible `ModelRegistry` entries with registered search
+spaces, optionally retains compatible no-space models as fixed baselines, sorts all names, and
+creates `SearchModelConfig` values. It converts the global outer-search budget with one uniform,
+precommitted allocation across every searchable family and outer fold. Any integer remainder stays
+unused and visible. The planner never receives outer-fold scores.
+
+The AutoML fingerprint includes the policy excluding output paths, resolved dataset identity,
+selected candidates and modes, versioned search-space identities, allocation semantics, and the
+generated search fingerprint. Runtime, timestamps, and artifact paths remain outside identity.
 
 ## Deliberately deferred
 
 Multiclass classification, pruning, multi-objective optimization, arbitrary pipeline generation,
-feature/preprocessing search, full AutoML policy, XGBoost, LightGBM, CatBoost, neural networks,
+feature/preprocessing search, pipeline invention, XGBoost, LightGBM, CatBoost, neural networks,
 GPU/distributed scheduling,
 robustness suites, statistical significance, deployment, persistent analytics, and web UI remain
-future work.
+future work. Outer-fold-driven family racing is explicitly excluded because those folds remain
+unbiased evaluation evidence.

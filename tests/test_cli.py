@@ -90,3 +90,32 @@ def test_cli_reports_invalid_search_configuration(
     error = capsys.readouterr().err
     assert "benchforge: error:" in error
     assert "at least one search candidate is required" in error
+
+
+def test_cli_automl_plan_only_does_not_execute_search(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> object:
+        raise AssertionError("run_automl must not be called by --plan-only")
+
+    monkeypatch.setattr("benchforge.cli.run_automl", forbidden)
+    assert main(["automl", "configs/examples/breast_cancer_automl.yaml", "--plan-only"]) == 0
+    output = capsys.readouterr().out
+    assert "BenchForge AutoML plan" in output
+    assert "Trials per family / outer fold: 1" in output
+    assert "logistic_regression" in output
+
+
+def test_cli_runs_automl(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    data = yaml.safe_load(
+        Path("configs/examples/breast_cancer_automl.yaml").read_text(encoding="utf-8")
+    )
+    data["models"]["include"] = ["logistic_regression", "dummy_classifier"]
+    data["budget"] = {"total_trials": 2, "final_search_trials": 0}
+    data["output"]["directory"] = str(tmp_path / "artifacts")
+    config_path = tmp_path / "automl.yaml"
+    config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    assert main(["automl", str(config_path)]) == 0
+    output = capsys.readouterr().out
+    assert "BenchForge AutoML complete" in output
+    assert "Top measured family:" in output

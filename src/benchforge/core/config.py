@@ -269,8 +269,46 @@ class SearchBudget(StrictModel):
 
 class FinalSearchConfig(StrictModel):
     enabled: bool = False
-    trials: int = Field(default=20, ge=1)
+    trials: int = Field(default=20, ge=0)
     timeout_seconds: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def enabled_search_has_trials(self) -> FinalSearchConfig:
+        if self.enabled and self.trials < 1:
+            raise ValueError("enabled final search requires at least one trial")
+        return self
+
+
+class AutoMLBudget(StrictModel):
+    total_trials: int = Field(gt=0)
+    final_search_trials: int = Field(default=0, ge=0)
+    timeout_seconds_per_outer_fold: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def final_reserve_leaves_an_outer_budget(self) -> AutoMLBudget:
+        if self.final_search_trials >= self.total_trials:
+            raise ValueError("final_search_trials must be less than total_trials")
+        return self
+
+
+class AutoMLModelPolicy(StrictModel):
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+    include_fixed_baselines: bool = True
+
+    @field_validator("include", "exclude")
+    @classmethod
+    def model_names_are_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("model policy entries must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def include_and_exclude_do_not_overlap(self) -> AutoMLModelPolicy:
+        overlap = sorted(set(self.include) & set(self.exclude))
+        if overlap:
+            raise ValueError(f"include and exclude overlap: {', '.join(overlap)}")
+        return self
 
 
 class SearchConfig(StrictModel):
@@ -378,6 +416,97 @@ def load_search_config(path: str | Path) -> SearchConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"configuration {config_path} must contain a YAML mapping")
     return SearchConfig.model_validate(raw)
+
+
+class AutoMLConfig(StrictModel):
+    schema_version: Literal[1] = 1
+    task: TaskType
+    dataset: DatasetSourceConfig
+    outer_split: SplitConfig
+    inner_split: SplitConfig
+    preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    metrics: tuple[MetricName, ...]
+    primary_metric: MetricName
+    budget: AutoMLBudget
+    models: AutoMLModelPolicy = Field(default_factory=AutoMLModelPolicy)
+    seed: int = Field(default=42, ge=0, le=2**32 - 1)
+    output: OutputConfig = Field(default_factory=OutputConfig)
+
+    @field_validator("metrics")
+    @classmethod
+    def automl_metrics_are_nonempty_and_unique(
+        cls, value: tuple[MetricName, ...]
+    ) -> tuple[MetricName, ...]:
+        if not value:
+            raise ValueError("at least one metric is required")
+        if len(set(value)) != len(value):
+            raise ValueError("metrics must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def validate_automl_semantics(self) -> AutoMLConfig:
+        if isinstance(self.dataset, FileDatasetConfig) and self.dataset.task != self.task:
+            raise ValueError("file dataset task must match the AutoML task")
+        if self.primary_metric not in self.metrics:
+            raise ValueError("primary_metric must also be present in metrics")
+        _validate_task_semantics(self.task, self.outer_split, self.metrics)
+        _validate_task_semantics(self.task, self.inner_split, self.metrics)
+        return self
+
+    def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
+        data = self.model_dump(mode="json", exclude_none=True)
+        data["models"]["include"] = sorted(data["models"]["include"])
+        data["models"]["exclude"] = sorted(data["models"]["exclude"])
+        if not include_output:
+            data.pop("output", None)
+        return data
+
+    @property
+    def fingerprint(self) -> str:
+        """Stable unresolved policy identity; the output location is excluded."""
+        canonical = json.dumps(
+            self.canonical_dict(include_output=False),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+    def fingerprint_for_plan(
+        self,
+        *,
+        dataset_identity: str,
+        selected_models: dict[str, Any],
+        search_spaces: dict[str, Any],
+        allocation: dict[str, int],
+        search_fingerprint: str,
+    ) -> str:
+        policy = self.canonical_dict(include_output=False)
+        dataset_semantics = policy["dataset"]
+        if isinstance(dataset_semantics, dict) and "source" in dataset_semantics:
+            dataset_semantics.pop("path", None)
+        semantics = {
+            "automl": policy,
+            "resolved_dataset_identity": dataset_identity,
+            "selected_models": selected_models,
+            "search_spaces": search_spaces,
+            "allocation": allocation,
+            "generated_search_fingerprint": search_fingerprint,
+        }
+        canonical = json.dumps(semantics, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def load_automl_config(path: str | Path) -> AutoMLConfig:
+    config_path = Path(path)
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"cannot read configuration {config_path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"invalid YAML in {config_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"configuration {config_path} must contain a YAML mapping")
+    return AutoMLConfig.model_validate(raw)
 
 
 def _validate_task_semantics(

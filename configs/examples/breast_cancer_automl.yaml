@@ -1,0 +1,21 @@
+schema_version: 1
+task: binary_classification
+dataset:
+  name: breast_cancer
+outer_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+inner_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+metrics: [roc_auc, balanced_accuracy, f1]
+primary_metric: roc_auc
+# This small offline example funds one trial per family/fold plus two final trials.
+# Increase total_trials for real comparisons.
+budget:
+  total_trials: 10
+  final_search_trials: 2
+models:
+  include: []
+  exclude: []
+  include_fixed_baselines: true
+seed: 42
+output:
+  directory: artifacts

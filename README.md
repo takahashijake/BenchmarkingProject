@@ -3,15 +3,18 @@
 BenchForge is reproducible benchmarking infrastructure for classical machine learning. It turns a
 strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
-BenchForge V0.4 supports binary classification and regression through the same three workflow
+BenchForge V0.5 supports binary classification and regression through four workflow
 levels:
 
 - `benchforge run`: execute one concrete pipeline.
 - `benchforge benchmark`: compare several concrete pipelines on shared folds.
 - `benchforge search`: tune several model families under a finite budget and compare the tuning
   procedures using untouched, shared outer folds.
+- `benchforge automl`: deterministically choose supported families and translate a global trial
+  budget into an ordinary nested-search configuration.
 
-Future AutoML may orchestrate the search layer, but automatic pipeline invention is not V0.4.
+AutoML is compute-aware orchestration over the existing search layer, not automatic pipeline
+invention.
 
 ## Installation and examples
 
@@ -30,12 +33,65 @@ benchforge search configs/examples/mixed_tabular_search.yaml
 benchforge run configs/examples/diabetes_regression_run.yaml
 benchforge benchmark configs/examples/diabetes_regression_suite.yaml
 benchforge search configs/examples/diabetes_regression_search.yaml
+benchforge automl configs/examples/breast_cancer_automl.yaml --plan-only
+benchforge automl configs/examples/breast_cancer_automl.yaml
+benchforge automl configs/examples/diabetes_regression_automl.yaml
 benchforge run configs/examples/rental_prices_regression_run.yaml
 ```
 
 The Python API exposes `load_run_config()` / `run_benchmark()`,
 `load_benchmark_config()` / `run_benchmark_suite()`, and
-`load_search_config()` / `run_search()`.
+`load_search_config()` / `run_search()`, and
+`load_automl_config()` / `build_automl_plan()` / `run_automl()`.
+
+## AutoML configuration and policy
+
+AutoML accepts a global trial budget and creates a normal `SearchConfig` before delegating all
+training and evaluation to `run_search()`:
+
+```yaml
+schema_version: 1
+task: binary_classification
+dataset: {name: breast_cancer}
+outer_split: {strategy: stratified_kfold, n_splits: 5, shuffle: true}
+inner_split: {strategy: stratified_kfold, n_splits: 3, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+metrics: [roc_auc, balanced_accuracy, f1]
+primary_metric: roc_auc
+budget:
+  total_trials: 240
+  final_search_trials: 40
+  # timeout_seconds_per_outer_fold: 600
+models:
+  include: []
+  exclude: []
+  include_fixed_baselines: true
+seed: 42
+output: {directory: artifacts}
+```
+
+Candidates come from `ModelRegistry` and `SearchSpaceRegistry`. An empty `include` considers every
+task-compatible registered model; a nonempty `include` restricts that set, and `exclude` removes
+names. Unknown, task-incompatible, duplicate, or overlapping policy entries fail before training.
+Task-compatible models with search spaces are tuned; models without spaces are fixed candidates
+when `include_fixed_baselines` is enabled. Candidate order is canonical by model name.
+
+For `S` searchable families, `O` outer folds, total trials `T`, and final reserve `F`, the planner
+uses `floor((T - F) / (S × O))` trials for every family/fold study. The remainder is reported but
+not adaptively reassigned. A plan that cannot fund at least one trial for every study is rejected.
+`F = 0` disables final search. A configured timeout can stop studies early, so trial counts then
+become upper bounds.
+
+The plan reports an approximate maximum estimator-fit count:
+
+```text
+allocated outer trials × inner folds
++ one outer refit per candidate/fold
++ final-search trials × inner folds
+```
+
+Use `--plan-only` to inspect candidate names, allocation, fingerprints, and this estimate without
+fitting a model. No outer-validation score influences candidate selection or budget allocation.
 
 ## Search configuration
 
@@ -187,15 +243,27 @@ configuration, BenchForge/dependency versions, and seed, sequential proposal seq
 selected parameters, predictions, metrics, ranking, and fingerprint should be materially
 equivalent. Runtime fields are intentionally excluded from deterministic comparisons.
 
+AutoML composes those artifacts rather than serializing search evidence again:
+
+```text
+artifacts/automl_<UTC timestamp>_<fingerprint>/
+├── automl_config.json
+├── plan.json
+├── generated_search_config.json
+├── metadata.json
+├── result.json
+└── search/
+    └── ... ordinary SearchArtifactStore output ...
+```
+
 See [the architecture document](docs/architecture.md) for dependency boundaries.
 
 ## Current limitations and roadmap
 
-V0.4 search is single-process and supports binary classification and regression. It does not
+V0.5 search and AutoML are single-process and support binary classification and regression. AutoML
+does not invent pipelines or adapt family budgets from outer-fold evidence. BenchForge does not
 implement multiclass classification, pruning, multi-objective search, arbitrary pipelines,
-feature-selection or preprocessing search, full AutoML, XGBoost, LightGBM, CatBoost, neural
-networks, GPUs, distributed workers, robustness suites, statistical significance testing, a
-persistent analytics catalog, model deployment, or a web UI.
-
-The suggested next major slice is an AutoML controller that composes the proven fixed benchmark and
-search layers without moving policy into the experiment kernel.
+feature-selection or preprocessing search, XGBoost, LightGBM, CatBoost, neural networks, GPUs,
+distributed workers, robustness suites, statistical significance testing, a persistent analytics
+catalog, model deployment, or a web UI. Adaptive racing may be considered only if it can operate
+wholly inside outer-training partitions.
