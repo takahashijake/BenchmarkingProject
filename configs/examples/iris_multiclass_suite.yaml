@@ -1,0 +1,27 @@
+schema_version: 1
+task: multiclass_classification
+dataset:
+  name: iris
+split:
+  strategy: stratified_kfold
+  n_splits: 3
+  shuffle: true
+preprocessing:
+  median_imputation: true
+  standardize: true
+models:
+  - name: dummy_classifier
+    parameters: {strategy: prior}
+  - name: logistic_regression
+    parameters: {C: 1.0, max_iter: 1000, solver: lbfgs}
+  - name: random_forest_classifier
+    parameters: {n_estimators: 60, max_depth: 8}
+  - name: extra_trees_classifier
+    parameters: {n_estimators: 60, max_depth: 8}
+  - name: hist_gradient_boosting_classifier
+    parameters: {max_iter: 60}
+metrics: [accuracy, balanced_accuracy, f1_macro]
+primary_metric: balanced_accuracy
+seed: 42
+output:
+  directory: artifacts

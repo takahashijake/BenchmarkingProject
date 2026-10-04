@@ -40,9 +40,10 @@ def _logistic(trial: optuna.trial.Trial, fixed: dict[str, JsonScalar]) -> dict[s
     if "C" not in fixed:
         values["C"] = trial.suggest_float("C", 1e-4, 1e3, log=True)
     if "penalty" not in fixed:
-        solver = str(fixed.get("solver", "liblinear"))
+        solver = str(fixed.get("solver", "lbfgs"))
         penalties = ["l2"] if solver in {"lbfgs", "newton-cg", "newton-cholesky"} else ["l1", "l2"]
-        values["penalty"] = trial.suggest_categorical("penalty", penalties)
+        if len(penalties) > 1:
+            values["penalty"] = trial.suggest_categorical("penalty", penalties)
     if "class_weight" not in fixed:
         values["class_weight"] = trial.suggest_categorical("class_weight", [None, "balanced"])
     return values
@@ -109,15 +110,19 @@ def _hist_gradient_boosting(
 
 LOGISTIC_SPACE = SearchSpace(
     name="logistic_regression",
-    version=1,
+    version=2,
     definition={
         "C": {"type": "float", "low": 1e-4, "high": 1e3, "log": True},
-        "penalty": {"type": "categorical", "choices": ["l1", "l2"]},
+        "penalty": {
+            "type": "conditional_categorical",
+            "choices": ["l1", "l2"],
+            "default_solver_behavior": "fixed_l2",
+        },
         "class_weight": {"type": "categorical", "choices": [None, "balanced"]},
-        "defaults": {"solver": "liblinear", "max_iter": 1000},
+        "defaults": {"solver": "lbfgs", "max_iter": 1000},
     },
     suggest=_logistic,
-    defaults={"solver": "liblinear", "max_iter": 1000},
+    defaults={"solver": "lbfgs", "max_iter": 1000},
 )
 
 TREE_DEFINITION = {

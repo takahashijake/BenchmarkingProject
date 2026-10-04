@@ -31,8 +31,13 @@ class ModelCapabilities:
 @dataclass(frozen=True)
 class ModelSpec:
     factory: ModelFactory
-    task: TaskType = TaskType.BINARY_CLASSIFICATION
+    supported_tasks: frozenset[TaskType] = frozenset(
+        {TaskType.BINARY_CLASSIFICATION, TaskType.MULTICLASS_CLASSIFICATION}
+    )
     capabilities: ModelCapabilities = ModelCapabilities()
+
+    def supports_task(self, task: TaskType) -> bool:
+        return task in self.supported_tasks
 
 
 def _logistic_regression(parameters: dict[str, Any], seed: int) -> BaseEstimator:
@@ -105,9 +110,11 @@ class ModelRegistry:
 
     def create(self, config: ModelConfig, seed: int, task: TaskType | None = None) -> BaseEstimator:
         spec = self._resolve(config.name)
-        if task is not None and spec.task != task:
+        if task is not None and not spec.supports_task(task):
+            supported = ", ".join(sorted(item.value for item in spec.supported_tasks))
             raise ValueError(
-                f"model '{config.name}' supports task '{spec.task}', not configured task '{task}'"
+                f"model '{config.name}' supports tasks [{supported}], "
+                f"not configured task '{task}'"
             )
         try:
             return spec.factory(dict(config.parameters), seed)
@@ -117,13 +124,16 @@ class ModelRegistry:
     def capabilities(self, name: str) -> ModelCapabilities:
         return self._resolve(name).capabilities
 
-    def task(self, name: str) -> TaskType:
-        return self._resolve(name).task
+    def supports_task(self, name: str, task: TaskType) -> bool:
+        return self._resolve(name).supports_task(task)
+
+    def supported_tasks(self, name: str) -> frozenset[TaskType]:
+        return self._resolve(name).supported_tasks
 
     def identity_for(self, model_names: set[str]) -> dict[str, Any]:
         return {
             name: {
-                "task": self.task(name).value,
+                "supported_tasks": sorted(task.value for task in self.supported_tasks(name)),
                 "capabilities": {
                     "requires_dense": self.capabilities(name).requires_dense,
                 },
@@ -153,15 +163,19 @@ default_model_registry = ModelRegistry(
             capabilities=ModelCapabilities(requires_dense=True),
         ),
         "dummy_classifier": ModelSpec(_dummy),
-        "linear_regression": ModelSpec(_linear_regression, TaskType.REGRESSION),
-        "ridge_regressor": ModelSpec(_ridge_regressor, TaskType.REGRESSION),
-        "random_forest_regressor": ModelSpec(_random_forest_regressor, TaskType.REGRESSION),
-        "extra_trees_regressor": ModelSpec(_extra_trees_regressor, TaskType.REGRESSION),
+        "linear_regression": ModelSpec(_linear_regression, frozenset({TaskType.REGRESSION})),
+        "ridge_regressor": ModelSpec(_ridge_regressor, frozenset({TaskType.REGRESSION})),
+        "random_forest_regressor": ModelSpec(
+            _random_forest_regressor, frozenset({TaskType.REGRESSION})
+        ),
+        "extra_trees_regressor": ModelSpec(
+            _extra_trees_regressor, frozenset({TaskType.REGRESSION})
+        ),
         "hist_gradient_boosting_regressor": ModelSpec(
             _hist_gradient_boosting_regressor,
-            TaskType.REGRESSION,
+            frozenset({TaskType.REGRESSION}),
             ModelCapabilities(requires_dense=True),
         ),
-        "dummy_regressor": ModelSpec(_dummy_regressor, TaskType.REGRESSION),
+        "dummy_regressor": ModelSpec(_dummy_regressor, frozenset({TaskType.REGRESSION})),
     }
 )

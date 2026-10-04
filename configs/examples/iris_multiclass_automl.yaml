@@ -1,0 +1,19 @@
+schema_version: 1
+task: multiclass_classification
+dataset: {name: iris}
+outer_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+inner_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+metrics: [accuracy, balanced_accuracy, f1_macro]
+primary_metric: balanced_accuracy
+# One trial per searchable family/fold, with two trials reserved for final search.
+budget:
+  total_trials: 10
+  final_search_trials: 2
+models:
+  include: []
+  exclude: []
+  include_fixed_baselines: true
+seed: 42
+output:
+  directory: artifacts

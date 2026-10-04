@@ -28,45 +28,64 @@ class AggregateMetric:
 @dataclass(frozen=True)
 class MetricSpec:
     name: MetricName
-    task: TaskType
+    supported_tasks: frozenset[TaskType]
     direction: Literal["maximize", "minimize"]
     requires_score: bool = False
     display_name: str = ""
 
+    def supports_task(self, task: TaskType) -> bool:
+        return task in self.supported_tasks
+
+
+CLASSIFICATION_TASKS = frozenset(
+    {TaskType.BINARY_CLASSIFICATION, TaskType.MULTICLASS_CLASSIFICATION}
+)
+
 
 _METRIC_SPECS: dict[MetricName, MetricSpec] = {
     MetricName.ACCURACY: MetricSpec(
-        MetricName.ACCURACY, TaskType.BINARY_CLASSIFICATION, "maximize", display_name="Accuracy"
+        MetricName.ACCURACY, CLASSIFICATION_TASKS, "maximize", display_name="Accuracy"
     ),
     MetricName.BALANCED_ACCURACY: MetricSpec(
         MetricName.BALANCED_ACCURACY,
-        TaskType.BINARY_CLASSIFICATION,
+        CLASSIFICATION_TASKS,
         "maximize",
         display_name="Balanced accuracy",
     ),
     MetricName.F1: MetricSpec(
-        MetricName.F1, TaskType.BINARY_CLASSIFICATION, "maximize", display_name="F1"
+        MetricName.F1,
+        frozenset({TaskType.BINARY_CLASSIFICATION}),
+        "maximize",
+        display_name="F1",
+    ),
+    MetricName.F1_MACRO: MetricSpec(
+        MetricName.F1_MACRO,
+        frozenset({TaskType.MULTICLASS_CLASSIFICATION}),
+        "maximize",
+        display_name="Macro F1",
     ),
     MetricName.ROC_AUC: MetricSpec(
         MetricName.ROC_AUC,
-        TaskType.BINARY_CLASSIFICATION,
+        frozenset({TaskType.BINARY_CLASSIFICATION}),
         "maximize",
         requires_score=True,
         display_name="ROC-AUC",
     ),
     MetricName.MEAN_ABSOLUTE_ERROR: MetricSpec(
         MetricName.MEAN_ABSOLUTE_ERROR,
-        TaskType.REGRESSION,
+        frozenset({TaskType.REGRESSION}),
         "minimize",
         display_name="MAE",
     ),
     MetricName.ROOT_MEAN_SQUARED_ERROR: MetricSpec(
         MetricName.ROOT_MEAN_SQUARED_ERROR,
-        TaskType.REGRESSION,
+        frozenset({TaskType.REGRESSION}),
         "minimize",
         display_name="RMSE",
     ),
-    MetricName.R2: MetricSpec(MetricName.R2, TaskType.REGRESSION, "maximize", display_name="R²"),
+    MetricName.R2: MetricSpec(
+        MetricName.R2, frozenset({TaskType.REGRESSION}), "maximize", display_name="R²"
+    ),
 }
 
 
@@ -84,7 +103,7 @@ def compute_metrics(
     values: dict[str, float] = {}
     for metric in requested:
         spec = metric_spec(metric)
-        if task is not None and spec.task != task:
+        if task is not None and not spec.supports_task(task):
             raise ValueError(f"metric '{metric}' is incompatible with task '{task}'")
         if metric == MetricName.ACCURACY:
             value = accuracy_score(truth, prediction)
@@ -92,6 +111,8 @@ def compute_metrics(
             value = balanced_accuracy_score(truth, prediction)
         elif metric == MetricName.F1:
             value = f1_score(truth, prediction)
+        elif metric == MetricName.F1_MACRO:
+            value = f1_score(truth, prediction, average="macro")
         elif metric == MetricName.ROC_AUC:
             if score is None:
                 raise ValueError("metric 'roc_auc' requires predict_proba or decision_function")

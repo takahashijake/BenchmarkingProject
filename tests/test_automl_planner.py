@@ -119,7 +119,9 @@ def test_registry_insertion_order_cannot_change_plan_ordering() -> None:
     names = [
         name
         for name in default_model_registry.names
-        if default_model_registry.task(name).value == "binary_classification"
+        if default_model_registry.supports_task(
+            name, load_automl_config("configs/examples/breast_cancer_automl.yaml").task
+        )
     ]
 
     def factory(model_name: str):

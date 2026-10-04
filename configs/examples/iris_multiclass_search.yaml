@@ -1,0 +1,20 @@
+schema_version: 1
+task: multiclass_classification
+dataset: {name: iris}
+outer_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+inner_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+models:
+  - {name: logistic_regression, id: logistic, mode: search}
+  - {name: random_forest_classifier, id: random_forest, mode: search}
+  - {name: dummy_classifier, id: dummy, mode: fixed, parameters: {strategy: prior}}
+metrics: [accuracy, balanced_accuracy, f1_macro]
+primary_metric: f1_macro
+budget:
+  trials_per_outer_fold: 1
+final_search:
+  enabled: true
+  trials: 2
+seed: 42
+output:
+  directory: artifacts

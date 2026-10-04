@@ -16,7 +16,12 @@ from benchforge.data.registry import (
     default_dataset_registry,
     summarize_dataset,
 )
-from benchforge.evaluation.metrics import AggregateMetric, aggregate_fold_metrics, compute_metrics
+from benchforge.evaluation.metrics import (
+    AggregateMetric,
+    aggregate_fold_metrics,
+    compute_metrics,
+    metric_spec,
+)
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.preprocessing.builder import build_preprocessor
 from benchforge.splits.stratified import Fold, build_folds
@@ -100,14 +105,20 @@ def execute_fold(
         validation_x = dataset.features.iloc[fold.validation_indices]
         validation_y = dataset.target.iloc[fold.validation_indices]
         pipeline.fit(train_x, train_y)
-        if config.task == TaskType.BINARY_CLASSIFICATION:
+        if config.task.is_classification:
             predicted = np.asarray(pipeline.predict(validation_x), dtype=np.int64)
             truth = validation_y.to_numpy(dtype=np.int64)
-            score = _prediction_score(pipeline, validation_x)
-        else:
+            score = (
+                _prediction_score(pipeline, validation_x)
+                if any(metric_spec(metric).requires_score for metric in config.metrics)
+                else None
+            )
+        elif config.task == TaskType.REGRESSION:
             predicted = np.asarray(pipeline.predict(validation_x), dtype=np.float64)
             truth = validation_y.to_numpy(dtype=np.float64)
             score = None
+        else:  # pragma: no cover - TaskType validation is exhaustive
+            raise ValueError(f"unsupported task '{config.task}'")
         metrics = compute_metrics(config.metrics, truth, predicted, score, config.task)
         fold_result = FoldResult(fold.fold_id, len(train_x), len(validation_x), metrics)
         predictions = tuple(
@@ -115,11 +126,11 @@ def execute_fold(
                 sample_index=int(sample_index),
                 fold_id=fold.fold_id,
                 truth=(
-                    int(actual) if config.task == TaskType.BINARY_CLASSIFICATION else float(actual)
+                    int(actual) if config.task.is_classification else float(actual)
                 ),
                 prediction=(
                     int(estimate)
-                    if config.task == TaskType.BINARY_CLASSIFICATION
+                    if config.task.is_classification
                     else float(estimate)
                 ),
                 score=None if score is None else float(score[position]),

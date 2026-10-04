@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 import pandas as pd
-from sklearn.datasets import load_breast_cancer, load_diabetes
+from sklearn.datasets import load_breast_cancer, load_diabetes, load_iris
 
 from benchforge.core.config import DatasetSourceConfig, FileDatasetConfig, TaskType
 from benchforge.data.tabular import load_tabular_dataset
@@ -175,6 +175,33 @@ def _load_diabetes() -> Dataset:
     )
 
 
+def _load_iris() -> Dataset:
+    bunch = load_iris(as_frame=True)
+    frame = bunch.frame
+    if frame is None:
+        raise RuntimeError("scikit-learn did not return the requested DataFrame")
+    target_name = str(bunch.target.name)
+    features = frame.drop(columns=[target_name])
+    target = frame[target_name].astype(int)
+    feature_names = tuple(str(column) for column in features.columns)
+    return Dataset(
+        identity="sklearn:iris:v1",
+        task=TaskType.MULTICLASS_CLASSIFICATION,
+        features=features,
+        target=target,
+        feature_names=feature_names,
+        numeric_feature_names=feature_names,
+        categorical_feature_names=(),
+        target_name=target_name,
+        missing_values={name: int(features[name].isna().sum()) for name in feature_names},
+        target_labels=tuple(str(name) for name in bunch.target_names),
+    )
+
+
 default_dataset_registry = DatasetRegistry(
-    {"breast_cancer": _load_breast_cancer, "diabetes": _load_diabetes}
+    {
+        "breast_cancer": _load_breast_cancer,
+        "diabetes": _load_diabetes,
+        "iris": _load_iris,
+    }
 )

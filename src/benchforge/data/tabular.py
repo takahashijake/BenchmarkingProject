@@ -65,12 +65,18 @@ def dataset_from_frame(frame: pd.DataFrame, config: FileDatasetConfig, identity:
     target_labels: tuple[str, ...] | None = None
     target_statistics = None
     target: pd.Series[Any]
-    if config.task == TaskType.BINARY_CLASSIFICATION:
+    if config.task.is_classification:
         unique_targets = list(pd.unique(raw_target))
-        if len(unique_targets) != 2:
+        class_count = len(unique_targets)
+        if config.task == TaskType.BINARY_CLASSIFICATION and class_count != 2:
             raise ValueError(
                 "binary-classification target must contain exactly 2 classes; "
-                f"found {len(unique_targets)}"
+                f"found {class_count}"
+            )
+        if config.task == TaskType.MULTICLASS_CLASSIFICATION and class_count < 3:
+            raise ValueError(
+                "multiclass-classification target must contain at least 3 classes; "
+                f"found {class_count}"
             )
         ordered_targets = sorted(unique_targets, key=lambda value: (str(type(value)), str(value)))
         mapping = {value: index for index, value in enumerate(ordered_targets)}

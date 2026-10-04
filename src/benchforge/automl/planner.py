@@ -82,13 +82,17 @@ def build_automl_plan(
     unknown = sorted(requested - known)
     if unknown:
         raise ValueError(f"unknown AutoML model names: {', '.join(unknown)}")
-    incompatible = sorted(name for name in requested if model_registry.task(name) != config.task)
+    incompatible = sorted(
+        name for name in requested if not model_registry.supports_task(name, config.task)
+    )
     if incompatible:
         raise ValueError(
             f"models incompatible with task '{config.task}': {', '.join(incompatible)}"
         )
 
-    compatible = {name for name in model_registry.names if model_registry.task(name) == config.task}
+    compatible = {
+        name for name in model_registry.names if model_registry.supports_task(name, config.task)
+    }
     selected = set(config.models.include) if config.models.include else compatible
     selected -= set(config.models.exclude)
     searchable_names = set(search_space_registry.names)

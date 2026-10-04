@@ -16,13 +16,22 @@ class StrictModel(BaseModel):
 
 class TaskType(StrEnum):
     BINARY_CLASSIFICATION = "binary_classification"
+    MULTICLASS_CLASSIFICATION = "multiclass_classification"
     REGRESSION = "regression"
+
+    @property
+    def is_classification(self) -> bool:
+        return self in {
+            TaskType.BINARY_CLASSIFICATION,
+            TaskType.MULTICLASS_CLASSIFICATION,
+        }
 
 
 class MetricName(StrEnum):
     ACCURACY = "accuracy"
     BALANCED_ACCURACY = "balanced_accuracy"
     F1 = "f1"
+    F1_MACRO = "f1_macro"
     ROC_AUC = "roc_auc"
     MEAN_ABSOLUTE_ERROR = "mean_absolute_error"
     ROOT_MEAN_SQUARED_ERROR = "root_mean_squared_error"
@@ -512,7 +521,7 @@ def load_automl_config(path: str | Path) -> AutoMLConfig:
 def _validate_task_semantics(
     task: TaskType, split: SplitConfig, metrics: tuple[MetricName, ...]
 ) -> None:
-    expected_split = "stratified_kfold" if task == TaskType.BINARY_CLASSIFICATION else "kfold"
+    expected_split = "stratified_kfold" if task.is_classification else "kfold"
     if split.strategy != expected_split:
         raise ValueError(
             f"split strategy '{split.strategy}' is incompatible with task '{task}'; "
@@ -522,6 +531,8 @@ def _validate_task_semantics(
     # registry the single source of truth for compatibility.
     from benchforge.evaluation.metrics import metric_spec
 
-    incompatible = [metric.value for metric in metrics if metric_spec(metric).task != task]
+    incompatible = [
+        metric.value for metric in metrics if not metric_spec(metric).supports_task(task)
+    ]
     if incompatible:
         raise ValueError(f"metrics {', '.join(incompatible)} are incompatible with task '{task}'")

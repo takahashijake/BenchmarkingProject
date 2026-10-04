@@ -3,8 +3,8 @@
 BenchForge is reproducible benchmarking infrastructure for classical machine learning. It turns a
 strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
-BenchForge V0.5 supports binary classification and regression through four workflow
-levels:
+BenchForge V0.6 supports binary classification, multiclass classification, and regression through
+four workflow levels:
 
 - `benchforge run`: execute one concrete pipeline.
 - `benchforge benchmark`: compare several concrete pipelines on shared folds.
@@ -30,6 +30,11 @@ benchforge benchmark configs/examples/breast_cancer_suite.yaml
 benchforge benchmark configs/examples/mixed_tabular_suite.yaml
 benchforge search configs/examples/breast_cancer_search.yaml
 benchforge search configs/examples/mixed_tabular_search.yaml
+benchforge run configs/examples/iris_multiclass_run.yaml
+benchforge benchmark configs/examples/iris_multiclass_suite.yaml
+benchforge search configs/examples/iris_multiclass_search.yaml
+benchforge automl configs/examples/iris_multiclass_automl.yaml --plan-only
+benchforge automl configs/examples/iris_multiclass_automl.yaml
 benchforge run configs/examples/diabetes_regression_run.yaml
 benchforge benchmark configs/examples/diabetes_regression_suite.yaml
 benchforge search configs/examples/diabetes_regression_search.yaml
@@ -152,8 +157,8 @@ cannot change the already-computed nested leaderboard.
 
 ## Data and leakage-safe preprocessing
 
-BenchForge includes the offline sklearn Breast Cancer Wisconsin classification dataset and
-Diabetes regression dataset, and reads local CSV or Parquet:
+BenchForge includes the offline sklearn Breast Cancer Wisconsin binary-classification, Iris
+multiclass-classification, and Diabetes regression datasets, and reads local CSV or Parquet:
 
 ```yaml
 dataset:
@@ -166,19 +171,26 @@ dataset:
   allow_high_cardinality: false
 ```
 
-For regression files, use `task: regression`; targets must be numeric, finite, non-missing, and
-non-constant. Integer-valued regression targets remain continuous and are never class encoded.
-Files are content-addressed. BenchForge validates paths, columns, targets, dtypes, feature
-availability, and categorical cardinality. Numeric columns use optional median imputation and
-standardization. Categorical columns use most-frequent imputation and one-hot encoding with unknown
-category handling. A fresh sklearn pipeline is fitted inside every inner or ordinary training fold;
-learned preprocessing state is never shared across folds.
+Binary file targets must contain exactly two classes. Multiclass file targets must contain at least
+three classes. Both are encoded to integer IDs using a deterministic ordering independent of row
+order, while human-readable labels remain in dataset summaries. BenchForge never infers multiclass
+semantics from a binary task declaration. For regression files, use `task: regression`; targets
+must be numeric, finite, non-missing, and non-constant. Integer-valued regression targets remain
+continuous and are never class encoded. Files are content-addressed. BenchForge validates paths,
+columns, targets, dtypes, feature availability, and categorical cardinality. Numeric columns use
+optional median imputation and standardization. Categorical columns use most-frequent imputation
+and one-hot encoding with unknown category handling. A fresh sklearn pipeline is fitted inside
+every inner or ordinary training fold; learned preprocessing state is never shared across folds.
 
 ## Tasks, models, metrics, and search spaces
 
-Binary classification uses stratified K-fold and supports Logistic Regression, Random Forest,
-Extra Trees, Histogram Gradient Boosting, and DummyClassifier. Its metrics are ROC-AUC, F1,
-accuracy, and balanced accuracy; all are maximized.
+Binary and multiclass classification use deterministic stratified K-fold and share the Logistic
+Regression, Random Forest, Extra Trees, Histogram Gradient Boosting, and DummyClassifier families.
+Binary metrics are ROC-AUC, F1, accuracy, and balanced accuracy. Multiclass metrics are macro F1,
+accuracy, and balanced accuracy. All classification metrics are maximized. Binary `f1` keeps its
+positive-class semantics; multiclass uses the explicit `f1_macro` metric. Multiclass ROC-AUC is not
+implemented in V0.6, and multiclass prediction artifacts intentionally leave the scalar `score`
+field empty.
 
 Regression uses shuffled deterministic K-fold and supports Linear Regression, Ridge, Random
 Forest, Extra Trees, Histogram Gradient Boosting, and DummyRegressor. Its metrics are RMSE and MAE
@@ -197,8 +209,9 @@ Versioned curated search spaces cover:
 - Regression Histogram Gradient Boosting: learning rate, iterations, leaves, leaf size, L2, and
   optional depth.
 
-DummyClassifier and DummyRegressor are fixed baselines and have no search spaces. LinearRegression
-may also remain fixed. Tree estimators default to `n_jobs=1`.
+Classifier search spaces are reused across binary and multiclass tasks. DummyClassifier and
+DummyRegressor are fixed baselines and have no search spaces. LinearRegression may also remain
+fixed. Tree estimators default to `n_jobs=1`.
 
 ## Failure and ranking semantics
 
@@ -260,10 +273,9 @@ See [the architecture document](docs/architecture.md) for dependency boundaries.
 
 ## Current limitations and roadmap
 
-V0.5 search and AutoML are single-process and support binary classification and regression. AutoML
-does not invent pipelines or adapt family budgets from outer-fold evidence. BenchForge does not
-implement multiclass classification, pruning, multi-objective search, arbitrary pipelines,
-feature-selection or preprocessing search, XGBoost, LightGBM, CatBoost, neural networks, GPUs,
-distributed workers, robustness suites, statistical significance testing, a persistent analytics
-catalog, model deployment, or a web UI. Adaptive racing may be considered only if it can operate
-wholly inside outer-training partitions.
+V0.6 search and AutoML are single-process. AutoML does not invent pipelines or adapt family budgets
+from outer-fold evidence. BenchForge does not implement multiclass ROC-AUC, pruning,
+multi-objective search, arbitrary pipelines, feature-selection or preprocessing search, XGBoost,
+LightGBM, CatBoost, neural networks, GPUs, distributed workers, robustness suites, statistical
+significance testing, a persistent analytics catalog, model deployment, or a web UI. Adaptive
+racing may be considered only if it can operate wholly inside outer-training partitions.

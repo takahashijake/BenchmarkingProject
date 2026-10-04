@@ -15,12 +15,22 @@ class Fold:
     validation_indices: NDArray[np.int64]
 
 
-def build_stratified_folds(target: pd.Series, config: SplitConfig, seed: int) -> tuple[Fold, ...]:
+def build_stratified_folds(
+    target: pd.Series,
+    config: SplitConfig,
+    seed: int,
+    task: TaskType = TaskType.BINARY_CLASSIFICATION,
+) -> tuple[Fold, ...]:
     if config.strategy != "stratified_kfold":
-        raise ValueError("binary classification requires split strategy 'stratified_kfold'")
+        raise ValueError("classification requires split strategy 'stratified_kfold'")
     class_counts = target.value_counts()
-    if len(class_counts) != 2:
-        raise ValueError("stratified binary cross-validation requires exactly two target classes")
+    class_count = len(class_counts)
+    if task == TaskType.BINARY_CLASSIFICATION and class_count != 2:
+        raise ValueError("binary classification requires exactly two target classes")
+    if task == TaskType.MULTICLASS_CLASSIFICATION and class_count < 3:
+        raise ValueError("multiclass classification requires at least three target classes")
+    if not task.is_classification:
+        raise ValueError(f"stratified folds are incompatible with task '{task}'")
     if int(class_counts.min()) < config.n_splits:
         raise ValueError(
             f"each target class needs at least {config.n_splits} rows for "
@@ -60,9 +70,11 @@ def build_kfold_folds(target: pd.Series, config: SplitConfig, seed: int) -> tupl
 def build_folds(
     target: pd.Series, config: SplitConfig, seed: int, task: TaskType
 ) -> tuple[Fold, ...]:
-    if task == TaskType.BINARY_CLASSIFICATION:
-        return build_stratified_folds(target, config, seed)
-    return build_kfold_folds(target, config, seed)
+    if task.is_classification:
+        return build_stratified_folds(target, config, seed, task)
+    if task == TaskType.REGRESSION:
+        return build_kfold_folds(target, config, seed)
+    raise ValueError(f"unsupported task '{task}'")  # pragma: no cover
 
 
 def build_inner_folds(
