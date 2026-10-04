@@ -60,6 +60,8 @@ def test_multiclass_run_is_deterministic_and_persists_integer_predictions(
     assert all(isinstance(record.prediction, int) for record in first.predictions)
     assert second.artifact_directory is not None
     artifacts = read_run_artifacts(second.artifact_directory)
+    assert artifacts["predictions"]
+    assert all(record["score"] == "" for record in artifacts["predictions"])
     assert artifacts["metadata"]["dataset_summary"]["target_labels"] == [
         "setosa",
         "versicolor",
@@ -83,6 +85,16 @@ def test_multiclass_benchmark_uses_shared_folds_and_persists(tmp_path: Path) -> 
     assert result.artifact_directory is not None
     artifacts = read_benchmark_artifacts(result.artifact_directory)
     assert artifacts["benchmark_config"]["task"] == "multiclass_classification"
+    assert all(
+        record.score is None
+        for candidate in result.candidates
+        for record in candidate.run_result.predictions
+    )
+    for candidate in result.candidates:
+        persisted = read_run_artifacts(
+            result.artifact_directory / "runs" / candidate.model_identifier
+        )
+        assert all(record["score"] == "" for record in persisted["predictions"])
 
 
 def test_multiclass_benchmark_isolates_an_incompatible_regressor() -> None:
@@ -130,6 +142,22 @@ def test_multiclass_nested_search_is_deterministic_leakage_safe_and_persists(
     artifacts = read_search_artifacts(second.artifact_directory)
     assert artifacts["dataset_summary"]["task"] == "multiclass_classification"
     assert artifacts["final_candidate"] is not None
+    assert all(
+        record.score is None
+        for family in second.families
+        for record in family.predictions
+    )
+    for family in second.families:
+        prediction_path = (
+            second.artifact_directory
+            / "families"
+            / family.model_identifier
+            / "outer_predictions.csv"
+        )
+        assert all(
+            line.endswith(",")
+            for line in prediction_path.read_text(encoding="utf-8").splitlines()[1:]
+        )
 
 
 def test_multiclass_search_isolates_a_failing_family() -> None:
@@ -195,6 +223,23 @@ def test_multiclass_automl_discovery_plan_execution_and_artifact_composition(
     artifacts = read_automl_artifacts(result.artifact_directory)
     assert artifacts["generated_search_config"]["task"] == "multiclass_classification"
     assert artifacts["result"]["search_artifacts"] == "search"
+    assert all(
+        record.score is None
+        for family in result.search_result.families
+        for record in family.predictions
+    )
+    for family in result.search_result.families:
+        prediction_path = (
+            result.artifact_directory
+            / "search"
+            / "families"
+            / family.model_identifier
+            / "outer_predictions.csv"
+        )
+        assert all(
+            line.endswith(",")
+            for line in prediction_path.read_text(encoding="utf-8").splitlines()[1:]
+        )
 
 
 def test_multiclass_cli_smoke_for_all_workflow_levels(

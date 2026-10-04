@@ -59,6 +59,18 @@ def test_string_multiclass_encoding_is_deterministic_across_row_order(tmp_path: 
     assert mapping == reordered_mapping == {"ant": 0, "moose": 1, "zebra": 2}
 
 
+def test_multiclass_target_rejects_missing_values(tmp_path: Path) -> None:
+    frame = pd.DataFrame(
+        {"feature": [1, 2, 3, 4], "target": ["ant", "moose", None, "zebra"]}
+    )
+    with pytest.raises(ValueError, match="contains missing values"):
+        dataset_from_frame(
+            frame,
+            _file_config(tmp_path / "unused.csv", TaskType.MULTICLASS_CLASSIFICATION),
+            "identity",
+        )
+
+
 @pytest.mark.parametrize(
     ("task", "target", "message"),
     [
