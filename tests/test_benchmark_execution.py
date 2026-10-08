@@ -86,3 +86,45 @@ def test_suite_artifacts_are_written_and_readable(tmp_path: Path) -> None:
     assert artifacts["metadata"]["benchmark_fingerprint"] == result.fingerprint
     assert len(artifacts["leaderboard"]) == len(config.models)
     assert len(list((result.artifact_directory / "runs").iterdir())) == len(result.candidates)
+
+
+def test_parallel_candidates_match_sequential_semantics() -> None:
+    config = _fast_config()
+    sequential = run_benchmark_suite(config, persist=False, workers=1)
+    parallel = run_benchmark_suite(config, persist=False, workers=2)
+    assert sequential.fingerprint == parallel.fingerprint
+    assert [c.model_identifier for c in sequential.candidates] == [
+        c.model_identifier for c in parallel.candidates
+    ]
+    assert [c.run_result.fold_results for c in sequential.candidates] == [
+        c.run_result.fold_results for c in parallel.candidates
+    ]
+    assert [c.run_result.predictions for c in sequential.candidates] == [
+        c.run_result.predictions for c in parallel.candidates
+    ]
+    assert [(r.rank, r.model_identifier, r.primary_metric_mean) for r in sequential.leaderboard] == [
+        (r.rank, r.model_identifier, r.primary_metric_mean) for r in parallel.leaderboard
+    ]
+
+
+def test_parallel_failures_are_isolated_and_ordered() -> None:
+    config = _fast_config().model_copy(update={"models": (
+        ModelConfig(name="random_forest_classifier", id="broken", parameters={"bad": 1}),
+        ModelConfig(name="logistic_regression", id="valid", parameters={"max_iter": 500}),
+    )})
+    result = run_benchmark_suite(config, persist=False, workers=2)
+    assert [c.model_identifier for c in result.candidates] == ["valid"]
+    assert [f.model_identifier for f in result.failures] == ["broken"]
+
+
+def test_workers_validation_and_oversubscription_rejection() -> None:
+    import pytest
+
+    config = _fast_config()
+    with pytest.raises(ValueError, match="at least 1"):
+        run_benchmark_suite(config, persist=False, workers=0)
+    oversubscribed = config.model_copy(update={"models": (
+        ModelConfig(name="random_forest_classifier", parameters={"n_jobs": 2}),
+    )})
+    with pytest.raises(ValueError, match="n_jobs=2"):
+        run_benchmark_suite(oversubscribed, persist=False, workers=2)
