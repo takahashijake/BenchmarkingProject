@@ -12,13 +12,13 @@ import os
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 import sklearn
 from filelock import FileLock, Timeout
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from benchforge._version import __version__
 from benchforge.core.config import BenchmarkConfig, ModelConfig
@@ -26,6 +26,9 @@ from benchforge.data.registry import Dataset
 from benchforge.evaluation.metrics import aggregate_fold_metrics
 from benchforge.execution.runner import RunResult
 from benchforge.splits.stratified import Fold
+
+if TYPE_CHECKING:
+    from benchforge.execution.benchmark import CandidateResult
 
 # Increment this whenever evaluation or checkpoint compatibility semantics change.
 WORKSPACE_SCHEMA = 1
