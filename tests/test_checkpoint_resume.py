@@ -171,9 +171,11 @@ def test_workspace_lock_blocks_concurrent_resume(tmp_path: Path) -> None:
     run_benchmark_suite(config, checkpoint_dir=workspace, persist=False)
     dataset = execution.default_dataset_registry.resolve(config.dataset)
     folds = execution.build_folds(dataset.target, config.split, config.seed, config.task)
-    with CheckpointWorkspace(workspace, config, dataset, folds, resume=True):
-        with pytest.raises(ValueError, match="already in use"):
-            run_benchmark_suite(config, checkpoint_dir=workspace, resume=True, persist=False)
+    with (
+        CheckpointWorkspace(workspace, config, dataset, folds, resume=True),
+        pytest.raises(ValueError, match="already in use"),
+    ):
+        run_benchmark_suite(config, checkpoint_dir=workspace, resume=True, persist=False)
 
 
 def test_unsafe_checkpoint_symlink_is_rejected(tmp_path: Path) -> None:
