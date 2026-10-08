@@ -178,11 +178,12 @@ def test_workspace_lock_blocks_concurrent_resume(tmp_path: Path) -> None:
         run_benchmark_suite(config, checkpoint_dir=workspace, resume=True, persist=False)
 
 
-def test_unsafe_checkpoint_symlink_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("filename", ["untrusted.json", ".incomplete.tmp"])
+def test_unsafe_checkpoint_symlink_is_rejected(tmp_path: Path, filename: str) -> None:
     config = _config(tmp_path)
     workspace = tmp_path / "work"
     run_benchmark_suite(config, checkpoint_dir=workspace, persist=False)
-    extra = workspace / "tasks" / "untrusted.json"
+    extra = workspace / "tasks" / filename
     try:
         extra.symlink_to(workspace / "workspace.json")
     except (OSError, NotImplementedError):
