@@ -102,9 +102,13 @@ def test_parallel_candidates_match_sequential_semantics() -> None:
     assert [c.run_result.predictions for c in sequential.candidates] == [
         c.run_result.predictions for c in parallel.candidates
     ]
-    assert [(r.rank, r.model_identifier, r.primary_metric_mean) for r in sequential.leaderboard] == [
+    sequential_ranks = [
+        (r.rank, r.model_identifier, r.primary_metric_mean) for r in sequential.leaderboard
+    ]
+    parallel_ranks = [
         (r.rank, r.model_identifier, r.primary_metric_mean) for r in parallel.leaderboard
     ]
+    assert sequential_ranks == parallel_ranks
 
 
 def test_parallel_failures_are_isolated_and_ordered() -> None:
