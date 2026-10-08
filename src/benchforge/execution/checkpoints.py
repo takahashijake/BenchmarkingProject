@@ -262,7 +262,7 @@ class CheckpointWorkspace:
             if not np.isfinite(duration) or duration < 0:
                 raise ValueError("invalid candidate duration")
             candidate = CandidateResult(identifier, model, run, duration)
-        except (OSError, ValueError, KeyError, TypeError, ValidationError) as exc:
+        except (OSError, ValueError, KeyError, TypeError) as exc:
             self.invalid.append(f"{identifier}: {type(exc).__name__}: {exc}")
             return None
         self.reused.append(identifier)
