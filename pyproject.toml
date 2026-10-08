@@ -51,5 +51,5 @@ strict = true
 packages = ["benchforge"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "sklearn.*", "yaml"]
+module = ["pyarrow.*", "sklearn.*", "threadpoolctl.*", "yaml"]
 ignore_missing_imports = true
