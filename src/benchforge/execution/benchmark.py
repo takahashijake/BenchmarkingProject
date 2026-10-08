@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter, process_time
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
+from benchforge.execution.checkpoints import CheckpointWorkspace
 from benchforge.data.registry import (
     Dataset,
     DatasetRegistry,
@@ -60,6 +62,10 @@ class BenchmarkResult:
     leaderboard: tuple[LeaderboardEntry, ...]
     total_duration_seconds: float
     artifact_directory: Path | None = None
+    checkpoint_workspace: Path | None = None
+    checkpoint_reused: tuple[str, ...] = ()
+    checkpoint_executed: tuple[str, ...] = ()
+    checkpoint_invalid: tuple[str, ...] = ()
 
 
 def _build_leaderboard(
@@ -155,16 +161,21 @@ def run_benchmark_suite(
     model_registry: ModelRegistry = default_model_registry,
     persist: bool = True,
     workers: int = 1,
+    checkpoint_dir: Path | None = None,
+    resume: bool = False,
 ) -> BenchmarkResult:
+    """Evaluate shared folds with optional verified candidate-level recovery."""
     started = perf_counter()
+    if resume and checkpoint_dir is None:
+        raise ValueError("resume requires a checkpoint_dir")
+    if checkpoint_dir is not None and model_registry is not default_model_registry:
+        raise ValueError("checkpointing requires the versioned default model registry")
     dataset = dataset_registry.resolve(config.dataset)
     if dataset.task != config.task:
         raise ValueError(
             f"dataset task '{dataset.task}' does not match configured task '{config.task}'"
         )
     folds = build_folds(dataset.target, config.split, config.seed, config.task)
-    candidates: list[CandidateResult] = []
-    failures: list[CandidateFailure] = []
 
     if workers < 1:
         raise ValueError("workers must be at least 1")
@@ -173,8 +184,6 @@ def run_benchmark_suite(
         raise ValueError(
             f"requested {workers} workers but only {available_cpus} logical CPUs detected"
         )
-    # Custom registries can contain local closures and cannot safely cross process
-    # boundaries. Keep their existing in-process behavior.
     if workers > 1 and model_registry is not default_model_registry:
         raise ValueError("parallel benchmark requires the default model registry")
     if workers > 1:
@@ -186,39 +195,79 @@ def run_benchmark_suite(
                     "parallel candidates require n_jobs=1"
                 )
 
-    if workers == 1:
-        outcomes = [
-            _execute_candidate(config, model, dataset, folds, model_registry, False)
-            for model in config.models
-        ]
-    else:
-        # map yields input order, not completion order. Precomputed folds are
-        # shared semantically; each process fits its own pipelines.
-        with ProcessPoolExecutor(max_workers=min(workers, len(config.models))) as pool:
-            outcomes = list(pool.map(
-                _candidate_process_entry,
-                ((config, model, dataset, folds) for model in config.models),
-            ))
-    for candidate, failure, _cpu_seconds in outcomes:
-        if candidate is not None:
-            candidates.append(candidate)
-        if failure is not None:
-            failures.append(failure)
-
-    primary_metric = config.primary_metric.value
-    result = BenchmarkResult(
-        fingerprint=config.fingerprint_for_dataset(dataset.identity),
-        dataset=summarize_dataset(dataset),
-        primary_metric=primary_metric,
-        fold_count=len(folds),
-        candidates=tuple(candidates),
-        failures=tuple(failures),
-        leaderboard=_build_leaderboard(
-            candidates, failures, primary_metric, metric_spec(config.primary_metric).direction
-        ),
-        total_duration_seconds=perf_counter() - started,
+    workspace = (
+        CheckpointWorkspace(checkpoint_dir, config, dataset, folds, resume=resume)
+        if checkpoint_dir is not None else None
     )
-    if persist:
-        directory = BenchmarkArtifactStore(config.output.directory).write(config, result)
-        result = replace(result, artifact_directory=directory)
+    # Only the coordinator commits checkpoints, never a worker. Completion order
+    # does not influence final candidate order or scientific fold semantics.
+    outcomes: dict[str, tuple[CandidateResult | None, CandidateFailure | None, float]] = {}
+    with ExitStack() as stack:
+        if workspace is not None:
+            stack.enter_context(workspace)
+        pending: list[ModelConfig] = []
+        for model in config.models:
+            identifier = model.id or model.name
+            cached = workspace.load(model) if workspace is not None else None
+            if cached is not None:
+                outcomes[identifier] = (cached, None, 0.0)
+            else:
+                pending.append(model)
+
+        if workers == 1:
+            for model in pending:
+                outcome = _execute_candidate(config, model, dataset, folds, model_registry, False)
+                identifier = model.id or model.name
+                outcomes[identifier] = outcome
+                if workspace is not None and outcome[0] is not None:
+                    workspace.save(outcome[0])
+        elif pending:
+            # Submit explicitly to commit each finished candidate as it arrives,
+            # preserving already-durable successes if a different worker dies.
+            with ProcessPoolExecutor(max_workers=min(workers, len(pending))) as pool:
+                future_models = {
+                    pool.submit(_candidate_process_entry, (config, model, dataset, folds)): model
+                    for model in pending
+                }
+                for future in as_completed(future_models):
+                    model = future_models[future]
+                    outcome = future.result()
+                    outcomes[model.id or model.name] = outcome
+                    if workspace is not None and outcome[0] is not None:
+                        workspace.save(outcome[0])
+
+        candidates = [
+            outcomes[model.id or model.name][0]
+            for model in config.models if outcomes[model.id or model.name][0] is not None
+        ]
+        failures = [
+            outcomes[model.id or model.name][1]
+            for model in config.models if outcomes[model.id or model.name][1] is not None
+        ]
+        # The None branches were filtered above; explicit narrowing makes mypy
+        # preserve the original public tuple types without casts.
+        valid_candidates: list[CandidateResult] = [c for c in candidates if c is not None]
+        valid_failures: list[CandidateFailure] = [f for f in failures if f is not None]
+
+        primary_metric = config.primary_metric.value
+        result = BenchmarkResult(
+            fingerprint=config.fingerprint_for_dataset(dataset.identity),
+            dataset=summarize_dataset(dataset),
+            primary_metric=primary_metric,
+            fold_count=len(folds),
+            candidates=tuple(valid_candidates),
+            failures=tuple(valid_failures),
+            leaderboard=_build_leaderboard(
+                valid_candidates, valid_failures, primary_metric,
+                metric_spec(config.primary_metric).direction,
+            ),
+            total_duration_seconds=perf_counter() - started,
+            checkpoint_workspace=checkpoint_dir,
+            checkpoint_reused=tuple(workspace.reused) if workspace is not None else (),
+            checkpoint_executed=tuple(workspace.executed) if workspace is not None else (),
+            checkpoint_invalid=tuple(workspace.invalid) if workspace is not None else (),
+        )
+        if persist:
+            directory = BenchmarkArtifactStore(config.output.directory).write(config, result)
+            result = replace(result, artifact_directory=directory)
     return result
