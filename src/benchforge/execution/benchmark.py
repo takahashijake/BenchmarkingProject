@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
-import os
 from pathlib import Path
 from time import perf_counter, process_time
 
