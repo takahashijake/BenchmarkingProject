@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 dependencies = [
+  "filelock>=3.13",
   "numpy>=1.26",
   "optuna>=4.0",
   "pandas>=2.1",
@@ -22,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2",
   "mypy>=1.11",
   "pandas-stubs>=2.1",
   "pytest>=8.0",
