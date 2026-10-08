@@ -8,6 +8,7 @@ from time import perf_counter, process_time
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
 from benchforge.data.registry import (
+    Dataset,
     DatasetRegistry,
     DatasetSummary,
     default_dataset_registry,
@@ -16,7 +17,7 @@ from benchforge.data.registry import (
 from benchforge.evaluation.metrics import AggregateMetric, metric_spec
 from benchforge.execution.runner import RunResult, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
-from benchforge.splits.stratified import build_folds
+from benchforge.splits.stratified import Fold, build_folds
 from benchforge.storage.suite import BenchmarkArtifactStore
 
 
@@ -108,8 +109,8 @@ def _build_leaderboard(
 def _execute_candidate(
     config: BenchmarkConfig,
     model: ModelConfig,
-    dataset: object,
-    folds: object,
+    dataset: Dataset,
+    folds: tuple[Fold, ...],
     model_registry: ModelRegistry,
     limit_threads: bool,
 ) -> tuple[CandidateResult | None, CandidateFailure | None, float]:
@@ -141,7 +142,7 @@ def _execute_candidate(
 
 
 def _candidate_process_entry(
-    arguments: tuple[BenchmarkConfig, ModelConfig, object, object],
+    arguments: tuple[BenchmarkConfig, ModelConfig, Dataset, tuple[Fold, ...]],
 ) -> tuple[CandidateResult | None, CandidateFailure | None, float]:
     config, model, dataset, folds = arguments
     return _execute_candidate(config, model, dataset, folds, default_model_registry, True)
