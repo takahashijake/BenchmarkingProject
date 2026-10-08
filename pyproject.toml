@@ -17,6 +17,7 @@ dependencies = [
   "pydantic>=2.7",
   "PyYAML>=6.0",
   "scikit-learn>=1.4",
+  "threadpoolctl>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -50,5 +51,5 @@ strict = true
 packages = ["benchforge"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "sklearn.*", "yaml"]
+module = ["pyarrow.*", "sklearn.*", "threadpoolctl.*", "yaml"]
 ignore_missing_imports = true

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, process_time
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
 from benchforge.data.registry import (
+    Dataset,
     DatasetRegistry,
     DatasetSummary,
     default_dataset_registry,
@@ -14,7 +17,7 @@ from benchforge.data.registry import (
 from benchforge.evaluation.metrics import AggregateMetric, metric_spec
 from benchforge.execution.runner import RunResult, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
-from benchforge.splits.stratified import build_folds
+from benchforge.splits.stratified import Fold, build_folds
 from benchforge.storage.suite import BenchmarkArtifactStore
 
 
@@ -103,12 +106,55 @@ def _build_leaderboard(
     return tuple([*successful, *failed])
 
 
+def _execute_candidate(
+    config: BenchmarkConfig,
+    model: ModelConfig,
+    dataset: Dataset,
+    folds: tuple[Fold, ...],
+    model_registry: ModelRegistry,
+    limit_threads: bool,
+) -> tuple[CandidateResult | None, CandidateFailure | None, float]:
+    """One isolated candidate; return results without worker-side artifact writes."""
+    from threadpoolctl import threadpool_limits
+
+    identifier = model.id or model.name
+    started = perf_counter()
+    cpu_started = process_time()
+    try:
+        if limit_threads:
+            with threadpool_limits(limits=1):
+                result = run_benchmark(
+                    config.to_run_config(model), model_registry=model_registry,
+                    persist=False, dataset=dataset, folds=folds,
+                )
+        else:
+            result = run_benchmark(
+                config.to_run_config(model), model_registry=model_registry,
+                persist=False, dataset=dataset, folds=folds,
+            )
+        candidate = CandidateResult(identifier, model, result, perf_counter() - started)
+        return candidate, None, process_time() - cpu_started
+    except Exception as exc:
+        failure = CandidateFailure(
+            identifier, model.name, type(exc).__name__, str(exc), perf_counter() - started
+        )
+        return None, failure, process_time() - cpu_started
+
+
+def _candidate_process_entry(
+    arguments: tuple[BenchmarkConfig, ModelConfig, Dataset, tuple[Fold, ...]],
+) -> tuple[CandidateResult | None, CandidateFailure | None, float]:
+    config, model, dataset, folds = arguments
+    return _execute_candidate(config, model, dataset, folds, default_model_registry, True)
+
+
 def run_benchmark_suite(
     config: BenchmarkConfig,
     *,
     dataset_registry: DatasetRegistry = default_dataset_registry,
     model_registry: ModelRegistry = default_model_registry,
     persist: bool = True,
+    workers: int = 1,
 ) -> BenchmarkResult:
     started = perf_counter()
     dataset = dataset_registry.resolve(config.dataset)
@@ -120,37 +166,44 @@ def run_benchmark_suite(
     candidates: list[CandidateResult] = []
     failures: list[CandidateFailure] = []
 
-    for model in config.models:
-        identifier = model.id or model.name
-        candidate_started = perf_counter()
-        try:
-            run_result = run_benchmark(
-                config.to_run_config(model),
-                dataset_registry=dataset_registry,
-                model_registry=model_registry,
-                persist=False,
-                dataset=dataset,
-                folds=folds,
-            )
-        except Exception as exc:
-            failures.append(
-                CandidateFailure(
-                    model_identifier=identifier,
-                    model_name=model.name,
-                    error_type=type(exc).__name__,
-                    message=str(exc),
-                    duration_seconds=perf_counter() - candidate_started,
-                )
-            )
-            continue
-        candidates.append(
-            CandidateResult(
-                model_identifier=identifier,
-                model_config=model,
-                run_result=run_result,
-                duration_seconds=perf_counter() - candidate_started,
-            )
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
+    available_cpus = os.cpu_count() or 1
+    if workers > available_cpus:
+        raise ValueError(
+            f"requested {workers} workers but only {available_cpus} logical CPUs detected"
         )
+    # Custom registries can contain local closures and cannot safely cross process
+    # boundaries. Keep their existing in-process behavior.
+    if workers > 1 and model_registry is not default_model_registry:
+        raise ValueError("parallel benchmark requires the default model registry")
+    if workers > 1:
+        for model in config.models:
+            jobs = model.parameters.get("n_jobs")
+            if jobs is not None and jobs != 1:
+                raise ValueError(
+                    f"model '{model.id or model.name}' sets n_jobs={jobs!r}; "
+                    "parallel candidates require n_jobs=1"
+                )
+
+    if workers == 1:
+        outcomes = [
+            _execute_candidate(config, model, dataset, folds, model_registry, False)
+            for model in config.models
+        ]
+    else:
+        # map yields input order, not completion order. Precomputed folds are
+        # shared semantically; each process fits its own pipelines.
+        with ProcessPoolExecutor(max_workers=min(workers, len(config.models))) as pool:
+            outcomes = list(pool.map(
+                _candidate_process_entry,
+                ((config, model, dataset, folds) for model in config.models),
+            ))
+    for candidate, failure, _cpu_seconds in outcomes:
+        if candidate is not None:
+            candidates.append(candidate)
+        if failure is not None:
+            failures.append(failure)
 
     primary_metric = config.primary_metric.value
     result = BenchmarkResult(

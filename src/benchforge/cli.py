@@ -39,6 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
         "benchmark", help="compare multiple models on shared cross-validation folds"
     )
     benchmark_parser.add_argument("config", help="path to a YAML benchmark configuration")
+    benchmark_parser.add_argument(
+        "--workers", type=int, default=1, help="parallel candidate processes (default: 1)"
+    )
     search_parser = subparsers.add_parser(
         "search", help="tune model families with nested cross-validation"
     )
@@ -68,7 +71,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = run_benchmark(load_run_config(args.config))
             summary = format_run_summary(result)
         elif args.command == "benchmark":
-            benchmark_result = run_benchmark_suite(load_benchmark_config(args.config))
+            benchmark_result = run_benchmark_suite(
+                load_benchmark_config(args.config), workers=args.workers
+            )
             summary = format_benchmark_summary(benchmark_result)
         elif args.command == "search":
             search_result = run_search(load_search_config(args.config))
