@@ -18,6 +18,22 @@ five workflow levels:
 AutoML is compute-aware orchestration over the existing search layer, not automatic pipeline
 invention.
 
+## Durable benchmark resume (v0.10)
+
+Long-running fixed benchmarks can now reuse verified completed candidates after an interruption.
+Start a checkpoint workspace with `--workspace`, then rerun with `--resume`.
+Only compatible, SHA-256-validated candidates are reused; incomplete/corrupt work is retrained.
+Workspaces are not published artifacts: the normal sealed evidence is written separately.
+
+```bash
+benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2 \\
+  --workspace artifacts/recovery/first-run
+benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2 \\
+  --resume artifacts/recovery/first-run
+```
+
+See [checkpoint design, recovery limits and verification](docs/v0.10-recovery.md).
+
 ## Opt-in bounded candidate parallelism (v0.9 preview)
 
 The `benchmark` command accepts `--workers N` (default 1). It runs independent
