@@ -8,7 +8,6 @@ from pathlib import Path
 from time import perf_counter, process_time
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
-from benchforge.execution.checkpoints import CheckpointWorkspace
 from benchforge.data.registry import (
     Dataset,
     DatasetRegistry,
@@ -17,6 +16,7 @@ from benchforge.data.registry import (
     summarize_dataset,
 )
 from benchforge.evaluation.metrics import AggregateMetric, metric_spec
+from benchforge.execution.checkpoints import CheckpointWorkspace
 from benchforge.execution.runner import RunResult, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.splits.stratified import Fold, build_folds
