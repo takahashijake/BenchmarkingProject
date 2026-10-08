@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from benchforge.artifacts.verify import verify
+from benchforge.catalog import Catalog
 from benchforge.cli import main
 from benchforge.core.config import (
     BenchmarkConfig,
@@ -263,3 +264,43 @@ def test_cli_workspace_then_resume_reports_reuse(
     recovered = capsys.readouterr().out
     assert "Reused candidates: 2" in recovered
     assert "Newly evaluated candidates: 0" in recovered
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        "configs/examples/iris_multiclass_suite.yaml",
+        "configs/examples/diabetes_regression_suite.yaml",
+    ],
+)
+def test_multiclass_and_regression_resume_preserve_results(
+    tmp_path: Path, example: str
+) -> None:
+    original = load_benchmark_config(example)
+    config = original.model_copy(update={
+        "models": original.models[:2],
+        "split": original.split.model_copy(update={"n_splits": 3}),
+        "output": OutputConfig(directory=tmp_path / "published"),
+    })
+    sequential = run_benchmark_suite(config, persist=False)
+    workspace = tmp_path / "recovery"
+    run_benchmark_suite(config, checkpoint_dir=workspace, persist=False)
+    resumed = run_benchmark_suite(
+        config, checkpoint_dir=workspace, resume=True, persist=False
+    )
+    assert not resumed.failures
+    assert len(resumed.checkpoint_reused) == 2
+    assert _semantic_results(resumed) == _semantic_results(sequential)
+
+
+def test_resumed_benchmark_publishes_catalog_compatible_sealed_evidence(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    workspace = tmp_path / "work"
+    run_benchmark_suite(config, checkpoint_dir=workspace, persist=False)
+    resumed = run_benchmark_suite(config, checkpoint_dir=workspace, resume=True)
+    assert resumed.artifact_directory is not None
+    assert verify(resumed.artifact_directory, deep=True).passed
+    with Catalog(tmp_path / "index.sqlite3") as catalog:
+        ids = catalog.ingest(resumed.artifact_directory)
+        assert len(ids) == 1
+        assert catalog.verify(ids[0], deep=True)[0].passed
