@@ -47,6 +47,16 @@ def format_benchmark_summary(result: BenchmarkResult) -> str:
             for failure in result.failures
         )
     artifact = str(result.artifact_directory) if result.artifact_directory else "not persisted"
+    recovery = ""
+    if result.checkpoint_workspace is not None:
+        recovery = (
+            f"\nCheckpoint workspace: {result.checkpoint_workspace}"
+            f"\nReused candidates: {len(result.checkpoint_reused)} "
+            f"({', '.join(result.checkpoint_reused) or 'none'})"
+            f"\nNewly evaluated candidates: {len(result.checkpoint_executed)}"
+        )
+        if result.checkpoint_invalid:
+            recovery += "\nRejected checkpoints: " + "; ".join(result.checkpoint_invalid)
     return (
         "BenchForge benchmark complete\n"
         f"Dataset: {result.dataset.identity}\n"
@@ -59,7 +69,7 @@ def format_benchmark_summary(result: BenchmarkResult) -> str:
         + "\n".join(rows)
         + failures
         + f"\nFingerprint: {result.fingerprint}\n"
-        f"Artifacts: {artifact}"
+        f"Artifacts: {artifact}" + recovery
     )
 
 
