@@ -200,3 +200,44 @@ def test_parallel_resume_has_same_scientific_evidence(tmp_path: Path) -> None:
     )
     assert _semantic_results(sequential) == _semantic_results(parallel)
     assert _semantic_results(parallel) == _semantic_results(resumed)
+
+
+def test_real_process_exit_after_first_commit_is_resumable(tmp_path: Path) -> None:
+    """OS process termination cannot turn completed JSON into partial success."""
+    import subprocess
+    import sys
+
+    config = _config(tmp_path)
+    config_path = tmp_path / "experiment.json"
+    config_path.write_text(config.model_dump_json(), encoding="utf-8")
+    workspace = tmp_path / "crash-workspace"
+    script = """
+import os
+import sys
+from pathlib import Path
+from benchforge.core.config import BenchmarkConfig
+from benchforge.execution.benchmark import run_benchmark_suite
+from benchforge.execution.checkpoints import CheckpointWorkspace
+
+config = BenchmarkConfig.model_validate_json(Path(sys.argv[1]).read_text(encoding="utf-8"))
+save = CheckpointWorkspace.save
+
+def crash_after_committing(self, candidate):
+    save(self, candidate)
+    os._exit(73)
+
+CheckpointWorkspace.save = crash_after_committing
+run_benchmark_suite(config, checkpoint_dir=Path(sys.argv[2]), persist=False)
+"""
+    child = subprocess.run(
+        [sys.executable, "-c", script, str(config_path), str(workspace)],
+        capture_output=True, text=True, timeout=45, check=False,
+    )
+    assert child.returncode == 73, child.stderr
+    assert len(list((workspace / "tasks").glob("*.json"))) == 1
+    result = run_benchmark_suite(
+        config, checkpoint_dir=workspace, resume=True, persist=False
+    )
+    assert result.checkpoint_reused == ("baseline",)
+    assert result.checkpoint_executed == ("logreg",)
+    assert not result.failures
