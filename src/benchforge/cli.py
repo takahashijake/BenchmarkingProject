@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -42,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_parser.add_argument(
         "--workers", type=int, default=1, help="parallel candidate processes (default: 1)"
     )
+    workspace_args = benchmark_parser.add_mutually_exclusive_group()
+    workspace_args.add_argument(
+        "--workspace", type=Path, help="create a new candidate checkpoint workspace"
+    )
+    workspace_args.add_argument(
+        "--resume", type=Path, help="resume a previously interrupted workspace"
+    )
     search_parser = subparsers.add_parser(
         "search", help="tune model families with nested cross-validation"
     )
@@ -72,7 +80,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = format_run_summary(result)
         elif args.command == "benchmark":
             benchmark_result = run_benchmark_suite(
-                load_benchmark_config(args.config), workers=args.workers
+                load_benchmark_config(args.config),
+                workers=args.workers,
+                checkpoint_dir=args.workspace or args.resume,
+                resume=args.resume is not None,
             )
             summary = format_benchmark_summary(benchmark_result)
         elif args.command == "search":
