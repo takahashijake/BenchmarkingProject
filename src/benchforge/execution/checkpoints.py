@@ -182,7 +182,9 @@ class CheckpointWorkspace:
                 raise ValueError(f"resume workspace does not exist: {self.path}")
             current = _read_regular_json(self.path / "workspace.json")
             if current != manifest:
-                raise ValueError("incompatible checkpoint workspace: experiment/configuration changed")
+                raise ValueError(
+                    "incompatible checkpoint workspace: experiment/configuration changed"
+                )
         else:
             if self.path.exists() or self.path.is_symlink():
                 raise ValueError(f"checkpoint workspace already exists; use --resume: {self.path}")
