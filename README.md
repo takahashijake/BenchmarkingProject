@@ -18,6 +18,18 @@ five workflow levels:
 AutoML is compute-aware orchestration over the existing search layer, not automatic pipeline
 invention.
 
+## Opt-in bounded candidate parallelism (v0.9 preview)
+
+The `benchmark` command accepts `--workers N` (default 1). It runs independent
+candidate models in up to N processes with a shared, deterministic CV fold plan.
+It does not parallelize nested search, robustness, or AutoML, and it does not yet
+support resuming incomplete experiments. See [execution design and measurement
+instructions](docs/v0.9-execution.md) for resource limits and benchmark commands.
+
+```bash
+benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2
+```
+
 ## Installation and examples
 
 BenchForge requires Python 3.12 or newer.
