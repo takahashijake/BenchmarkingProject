@@ -196,10 +196,12 @@ class CheckpointWorkspace:
             raise ValueError("checkpoint task directory is unsafe or missing")
         expected = {f"{value}.json" for value in self.task_keys.values()}
         for entry in task_dir.iterdir():
+            if entry.is_symlink() or not entry.is_file():
+                raise ValueError(f"unexpected checkpoint workspace member: {entry.name}")
             if entry.name.startswith(".") and entry.name.endswith(".tmp"):
                 # Unpublished temporary bytes after an interrupted atomic write.
                 continue
-            if entry.name not in expected or entry.is_symlink() or not entry.is_file():
+            if entry.name not in expected:
                 raise ValueError(f"unexpected checkpoint workspace member: {entry.name}")
 
     def _path_for(self, model: ModelConfig) -> Path:
@@ -262,7 +264,7 @@ class CheckpointWorkspace:
             if not np.isfinite(duration) or duration < 0:
                 raise ValueError("invalid candidate duration")
             candidate = CandidateResult(identifier, model, run, duration)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
+        except (FileNotFoundError, ValueError, KeyError, TypeError) as exc:
             self.invalid.append(f"{identifier}: {type(exc).__name__}: {exc}")
             return None
         self.reused.append(identifier)
