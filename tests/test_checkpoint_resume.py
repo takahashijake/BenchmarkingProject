@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from benchforge.artifacts.verify import verify
+from benchforge.cli import main
 from benchforge.core.config import (
     BenchmarkConfig,
     ModelConfig,
@@ -244,3 +245,21 @@ run_benchmark_suite(config, checkpoint_dir=Path(sys.argv[2]), persist=False)
     assert result.checkpoint_reused == ("baseline",)
     assert result.checkpoint_executed == ("logreg",)
     assert not result.failures
+
+
+def test_cli_workspace_then_resume_reports_reuse(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = _config(tmp_path)
+    config_path = tmp_path / "benchmark.yaml"
+    # JSON is a YAML subset; this keeps the exact typed config for both CLI runs.
+    config_path.write_text(config.model_dump_json(), encoding="utf-8")
+    workspace = tmp_path / "cli-work"
+    assert main(["benchmark", str(config_path), "--workspace", str(workspace)]) == 0
+    fresh = capsys.readouterr().out
+    assert "Newly evaluated candidates: 2" in fresh
+    assert "Reused candidates: 0" in fresh
+    assert main(["benchmark", str(config_path), "--resume", str(workspace)]) == 0
+    recovered = capsys.readouterr().out
+    assert "Reused candidates: 2" in recovered
+    assert "Newly evaluated candidates: 0" in recovered
