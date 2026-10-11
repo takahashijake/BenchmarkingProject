@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from contextlib import ExitStack, closing
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from time import perf_counter, process_time
+from time import monotonic, perf_counter, process_time
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
 from benchforge.data.registry import (
@@ -16,8 +16,9 @@ from benchforge.data.registry import (
     summarize_dataset,
 )
 from benchforge.evaluation.metrics import AggregateMetric, metric_spec
-from benchforge.execution.checkpoints import CheckpointWorkspace
+from benchforge.execution.checkpoints import CheckpointWorkspace, _write_atomic
 from benchforge.execution.runner import RunResult, run_benchmark
+from benchforge.execution.supervisor import ExecutionOptions, supervise
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.splits.stratified import Fold, build_folds
 from benchforge.storage.suite import BenchmarkArtifactStore
@@ -52,6 +53,14 @@ class LeaderboardEntry:
 
 
 @dataclass(frozen=True)
+class ExecutionDiagnostic:
+    model_identifier: str
+    outcome: str
+    elapsed_seconds: float
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class BenchmarkResult:
     fingerprint: str
     dataset: DatasetSummary
@@ -66,6 +75,8 @@ class BenchmarkResult:
     checkpoint_reused: tuple[str, ...] = ()
     checkpoint_executed: tuple[str, ...] = ()
     checkpoint_invalid: tuple[str, ...] = ()
+    execution_diagnostics: tuple[ExecutionDiagnostic, ...] = ()
+    execution_options: ExecutionOptions | None = None
 
 
 def _build_leaderboard(
@@ -130,13 +141,19 @@ def _execute_candidate(
         if limit_threads:
             with threadpool_limits(limits=1):
                 result = run_benchmark(
-                    config.to_run_config(model), model_registry=model_registry,
-                    persist=False, dataset=dataset, folds=folds,
+                    config.to_run_config(model),
+                    model_registry=model_registry,
+                    persist=False,
+                    dataset=dataset,
+                    folds=folds,
                 )
         else:
             result = run_benchmark(
-                config.to_run_config(model), model_registry=model_registry,
-                persist=False, dataset=dataset, folds=folds,
+                config.to_run_config(model),
+                model_registry=model_registry,
+                persist=False,
+                dataset=dataset,
+                folds=folds,
             )
         candidate = CandidateResult(identifier, model, result, perf_counter() - started)
         return candidate, None, process_time() - cpu_started
@@ -163,9 +180,14 @@ def run_benchmark_suite(
     workers: int = 1,
     checkpoint_dir: Path | None = None,
     resume: bool = False,
+    execution_options: ExecutionOptions | None = None,
 ) -> BenchmarkResult:
     """Evaluate shared folds with optional verified candidate-level recovery."""
     started = perf_counter()
+    options = execution_options or ExecutionOptions()
+    deadline = monotonic() + options.run_timeout if options.run_timeout is not None else None
+    if options.bounded and model_registry is not default_model_registry:
+        raise ValueError("budgeted benchmark requires the default model registry")
     if resume and checkpoint_dir is None:
         raise ValueError("resume requires a checkpoint_dir")
     if checkpoint_dir is not None and model_registry is not default_model_registry:
@@ -177,7 +199,7 @@ def run_benchmark_suite(
         )
     folds = build_folds(dataset.target, config.split, config.seed, config.task)
 
-    if workers < 1:
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ValueError("workers must be at least 1")
     available_cpus = os.cpu_count() or 1
     if workers > available_cpus:
@@ -186,7 +208,7 @@ def run_benchmark_suite(
         )
     if workers > 1 and model_registry is not default_model_registry:
         raise ValueError("parallel benchmark requires the default model registry")
-    if workers > 1:
+    if workers > 1 or options.bounded:
         for model in config.models:
             jobs = model.parameters.get("n_jobs")
             if jobs is not None and jobs != 1:
@@ -197,7 +219,8 @@ def run_benchmark_suite(
 
     workspace = (
         CheckpointWorkspace(checkpoint_dir, config, dataset, folds, resume=resume)
-        if checkpoint_dir is not None else None
+        if checkpoint_dir is not None
+        else None
     )
     # Only the coordinator commits checkpoints, never a worker. Completion order
     # does not influence final candidate order or scientific fold semantics.
@@ -214,7 +237,90 @@ def run_benchmark_suite(
             else:
                 pending.append(model)
 
-        if workers == 1:
+        outcome: tuple[CandidateResult | None, CandidateFailure | None, float]
+        if (options.bounded or workers > 1) and os.name == "posix":
+            arguments = [(config, model, dataset, folds) for model in pending]
+            diagnostics = {
+                model.id or model.name: ExecutionDiagnostic(
+                    model.id or model.name, "not_started", 0
+                )
+                for model in config.models
+            }
+            for identifier in outcomes:
+                diagnostics[identifier] = ExecutionDiagnostic(identifier, "reused", 0)
+            launched: dict[str, float] = {}
+
+            def on_start(index: int) -> None:
+                identifier = pending[index].id or pending[index].name
+                launched[identifier] = monotonic()
+                diagnostics[identifier] = ExecutionDiagnostic(identifier, "running", 0)
+
+            try:
+                with closing(
+                    supervise(
+                        _candidate_process_entry,
+                        arguments,
+                        workers=workers,
+                        options=options,
+                        deadline=deadline,
+                        on_start=on_start,
+                    )
+                ) as completions:
+                    for completed in completions:
+                        model = pending[completed.index]
+                        identifier = model.id or model.name
+                        if completed.reason is not None:
+                            failure = CandidateFailure(
+                                identifier,
+                                model.name,
+                                completed.reason,
+                                "not started: run budget exhausted"
+                                if completed.reason == "NotStarted"
+                                else f"isolated candidate stopped: {completed.reason}; "
+                                f"exit code {completed.exit_code}",
+                                completed.elapsed,
+                            )
+                            outcome = (None, failure, 0.0)
+                        else:
+                            if completed.result is None:
+                                raise RuntimeError("worker returned no candidate outcome")
+                            outcome = completed.result
+                        diagnostics[identifier] = ExecutionDiagnostic(
+                            identifier,
+                            "success"
+                            if outcome[0] is not None
+                            else completed.reason or "EstimatorFailure",
+                            completed.elapsed,
+                            outcome[1].error_type if outcome[1] is not None else None,
+                        )
+                        outcomes[identifier] = outcome
+                        if workspace is not None and outcome[0] is not None:
+                            workspace.save(outcome[0])
+            except BaseException as exc:
+                for identifier, diagnostic in diagnostics.items():
+                    if diagnostic.outcome == "running":
+                        diagnostics[identifier] = ExecutionDiagnostic(
+                            identifier,
+                            "Cancelled"
+                            if isinstance(exc, KeyboardInterrupt)
+                            else "CoordinatorError",
+                            monotonic() - launched[identifier],
+                            type(exc).__name__,
+                        )
+                raise
+            finally:
+                if workspace is not None:
+                    _write_atomic(
+                        workspace.path / "execution.json",
+                        {
+                            "schema_version": 1,
+                            "policy": asdict(options),
+                            "candidates": [
+                                asdict(diagnostics[m.id or m.name]) for m in config.models
+                            ],
+                        },
+                    )
+        elif workers == 1:
             for model in pending:
                 outcome = _execute_candidate(config, model, dataset, folds, model_registry, False)
                 identifier = model.id or model.name
@@ -238,11 +344,13 @@ def run_benchmark_suite(
 
         candidates = [
             outcomes[model.id or model.name][0]
-            for model in config.models if outcomes[model.id or model.name][0] is not None
+            for model in config.models
+            if outcomes[model.id or model.name][0] is not None
         ]
         failures = [
             outcomes[model.id or model.name][1]
-            for model in config.models if outcomes[model.id or model.name][1] is not None
+            for model in config.models
+            if outcomes[model.id or model.name][1] is not None
         ]
         # The None branches were filtered above; explicit narrowing makes mypy
         # preserve the original public tuple types without casts.
@@ -258,10 +366,18 @@ def run_benchmark_suite(
             candidates=tuple(valid_candidates),
             failures=tuple(valid_failures),
             leaderboard=_build_leaderboard(
-                valid_candidates, valid_failures, primary_metric,
+                valid_candidates,
+                valid_failures,
+                primary_metric,
                 metric_spec(config.primary_metric).direction,
             ),
             total_duration_seconds=perf_counter() - started,
+            execution_diagnostics=tuple(diagnostics[m.id or m.name] for m in config.models)
+            if (options.bounded or workers > 1) and os.name == "posix"
+            else (),
+            execution_options=options
+            if (options.bounded or workers > 1) and os.name == "posix"
+            else None,
             checkpoint_workspace=checkpoint_dir,
             checkpoint_reused=tuple(workspace.reused) if workspace is not None else (),
             checkpoint_executed=tuple(workspace.executed) if workspace is not None else (),

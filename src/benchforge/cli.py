@@ -25,6 +25,7 @@ from benchforge.core.config import (
 )
 from benchforge.execution.benchmark import run_benchmark_suite
 from benchforge.execution.runner import run_benchmark
+from benchforge.execution.supervisor import ExecutionOptions
 from benchforge.robustness import load_robustness_config, run_robustness
 from benchforge.search.runner import run_search
 
@@ -43,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_parser.add_argument(
         "--workers", type=int, default=1, help="parallel candidate processes (default: 1)"
     )
+    benchmark_parser.add_argument("--candidate-timeout", type=float, help="candidate wall seconds")
+    benchmark_parser.add_argument("--run-timeout", type=float, help="run execution wall seconds")
     workspace_args = benchmark_parser.add_mutually_exclusive_group()
     workspace_args.add_argument(
         "--workspace", type=Path, help="create a new candidate checkpoint workspace"
@@ -82,6 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             benchmark_result = run_benchmark_suite(
                 load_benchmark_config(args.config),
                 workers=args.workers,
+                execution_options=ExecutionOptions(args.candidate_timeout, args.run_timeout),
                 checkpoint_dir=args.workspace or args.resume,
                 resume=args.resume is not None,
             )
@@ -97,6 +101,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 summary = format_automl_plan(build_automl_plan(automl_config))
             else:
                 summary = format_automl_summary(run_automl(automl_config))
+    except KeyboardInterrupt:
+        print("benchforge: interrupted; committed checkpoints can be resumed", file=sys.stderr)
+        return 130
     except (ValidationError, ValueError, RuntimeError, OSError) as exc:
         print(f"benchforge: error: {exc}", file=sys.stderr)
         return 2

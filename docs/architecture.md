@@ -1,4 +1,4 @@
-# BenchForge V0.8 architecture
+# BenchForge architecture
 
 BenchForge separates deterministic policy, search orchestration, fixed comparison, and atomic
 execution:
@@ -258,3 +258,9 @@ cover current/legacy formats, protected-member mutations, missing nested evidenc
 idempotency, relocation, schema rejection, metric orientation and conservative comparisons. Existing
 fold-local preprocessing, nested-validation isolation and matched-robustness leakage tests remain
 part of the default suite.
+
+## Fixed benchmark supervision
+
+POSIX parallel and budgeted fixed benchmarks use isolated subprocess groups with
+bounded scheduling and coordinator-owned checkpoint commits. Scientific fitting
+still delegates to `execution.runner`. See [v0.11 decision and lifecycle](v0.11-execution.md).
