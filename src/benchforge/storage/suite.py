@@ -67,6 +67,15 @@ class BenchmarkArtifactStore:
                     "benchmark_fingerprint": result.fingerprint,
                 },
             )
+        if result.execution_options is not None:
+            _write_json(
+                directory / "execution.json",
+                {
+                    "schema_version": 1,
+                    "policy": asdict(result.execution_options),
+                    "candidates": [asdict(row) for row in result.execution_diagnostics],
+                },
+            )
         seal(directory)
         return directory
 

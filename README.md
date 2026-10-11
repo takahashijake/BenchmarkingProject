@@ -3,7 +3,7 @@
 BenchForge is reproducible benchmarking infrastructure for classical machine learning. It turns a
 strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
-BenchForge V0.8 supports binary classification, multiclass classification, and regression through
+BenchForge supports binary classification, multiclass classification, and regression through
 five workflow levels:
 
 - `benchforge run`: execute one concrete pipeline.
@@ -26,21 +26,23 @@ Only compatible, SHA-256-validated candidates are reused; incomplete/corrupt wor
 Workspaces are not published artifacts: the normal sealed evidence is written separately.
 
 ```bash
-benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2 \\
+benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2 \
   --workspace artifacts/recovery/first-run
-benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2 \\
+benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2 \
   --resume artifacts/recovery/first-run
 ```
 
 See [checkpoint design, recovery limits and verification](docs/v0.10-recovery.md).
 
-## Opt-in bounded candidate parallelism (v0.9 preview)
+## Resource-governed fixed benchmarks (v0.11)
 
 The `benchmark` command accepts `--workers N` (default 1). It runs independent
 candidate models in up to N processes with a shared, deterministic CV fold plan.
-It does not parallelize nested search, robustness, or AutoML, and it does not yet
-support resuming incomplete experiments. See [execution design and measurement
-instructions](docs/v0.9-execution.md) for resource limits and benchmark commands.
+On POSIX, `--candidate-timeout SECONDS` and `--run-timeout SECONDS` enforce
+candidate termination, including with one worker. Crashes and over-budget work
+remain explicit, unranked failures; completed checkpoints can be resumed.
+It does not parallelize nested search, robustness, or AutoML. See
+[supervision, platform limits and recovery](docs/v0.11-execution.md).
 
 ```bash
 benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2

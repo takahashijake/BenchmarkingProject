@@ -58,8 +58,17 @@ def format_benchmark_summary(result: BenchmarkResult) -> str:
         if result.checkpoint_invalid:
             recovery += "\nRejected checkpoints: " + "; ".join(result.checkpoint_invalid)
     return (
-        "BenchForge benchmark complete\n"
-        f"Dataset: {result.dataset.identity}\n"
+        (
+            "BenchForge benchmark incomplete\n"
+            if result.failures
+            else "BenchForge benchmark complete\n"
+        )
+        + (
+            "Ranks compare completed candidates only; unavailable results are not inferior.\n"
+            if result.failures
+            else ""
+        )
+        + f"Dataset: {result.dataset.identity}\n"
         f"Shape: {result.dataset.row_count} rows × {result.dataset.feature_count} features\n"
         f"Folds: {result.fold_count}\n"
         f"Primary metric: {spec.display_name} "
@@ -158,8 +167,7 @@ def format_automl_plan(plan: AutoMLPlan) -> str:
         f"Unused trials: {plan.unallocated_trials}\n"
         f"Approximate maximum estimator fits: {plan.approximate_maximum_fits}\n"
         f"AutoML fingerprint: {plan.fingerprint}\n"
-        f"Generated search fingerprint: {plan.search_fingerprint}"
-        + timeout_note
+        f"Generated search fingerprint: {plan.search_fingerprint}" + timeout_note
     )
 
 

@@ -81,6 +81,13 @@ class ModelConfig(StrictModel):
     id: str | None = Field(default=None, min_length=1, pattern=r"^[A-Za-z0-9_.-]+$")
     parameters: dict[str, JsonScalar] = Field(default_factory=dict)
 
+    @field_validator("name", "id")
+    @classmethod
+    def identifiers_are_safe_path_members(cls, value: str | None) -> str | None:
+        if value in {".", ".."}:
+            raise ValueError("model identifiers must not be dot path components")
+        return value
+
     @field_validator("parameters")
     @classmethod
     def random_state_is_centralized(cls, value: dict[str, JsonScalar]) -> dict[str, JsonScalar]:
