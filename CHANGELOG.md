@@ -8,6 +8,7 @@
 - Include resolved scientific declarations and dataset content in identity; seal separate distribution provenance.
 - Support serial provider checkpoint/resume and reject provider workers/hard budgets explicitly.
 - Keep verification/catalog ingestion independent of provider execution; report custom-score verification limits.
+- Preserve existing built-in catalog signatures when optional provider metadata is absent.
 - Add a standalone example distribution, installed CLI/API tests and wheel smoke checks on both CI versions.
 - Correct eager worker imports that caused baseline timeout regressions; preserve original timeout assertions.
 

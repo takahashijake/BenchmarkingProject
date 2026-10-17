@@ -63,6 +63,8 @@ def _semantics(descriptor: ArtifactDescriptor) -> str:
             k: v
             for k, v in descriptor.evaluation.model_dump(mode="json").items()
             if k not in {"scikit_learn_version", "fold_assignment_digest"}
+            # Absent extension data must preserve pre-v0.12 catalog signatures.
+            and (k != "provider_manifests" or v)
         },
         "candidates": [
             {

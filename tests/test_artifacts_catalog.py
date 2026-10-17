@@ -810,3 +810,30 @@ def test_historical_run_with_unavailable_dataset_summary(artifact_tree, tmp_path
     assert any(d.code == "historical_metadata_unavailable" for d in report.diagnostics)
     with Catalog(tmp_path / "db") as catalog:
         assert len(catalog.ingest(path)) == 1
+
+
+@pytest.mark.parametrize("kind", ["run", "benchmark", "search", "automl", "robustness"])
+def test_existing_builtin_catalog_semantics_survive_provider_upgrade(tmp_path, kind):
+    """Pre-v0.12 catalog rows contain no provider field in evaluation semantics."""
+    directory = generate(tmp_path / "artifacts", kind)
+    database = tmp_path / "legacy.sqlite"
+    with Catalog(database) as catalog:
+        identifiers = catalog.ingest(directory)
+        identifier = identifiers[0]
+        stored = json.loads(
+            catalog.connection.execute(
+                "SELECT semantics FROM experiments WHERE id=?", (identifier,)
+            ).fetchone()[0]
+        )
+        stored["evaluation"].pop("provider_manifests", None)
+        legacy = json.dumps(stored, sort_keys=True, separators=(",", ":"))
+        catalog.connection.execute(
+            "UPDATE experiments SET semantics=? WHERE id=?", (legacy, identifier)
+        )
+        catalog.connection.commit()
+    with Catalog(database) as upgraded:
+        assert upgraded.ingest(directory) == identifiers
+        assert (
+            upgraded.connection.execute("SELECT COUNT(*) FROM artifact_locations").fetchone()[0]
+            == 1
+        )
