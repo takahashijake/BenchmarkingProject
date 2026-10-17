@@ -256,6 +256,7 @@ def test_automl_and_robustness_use_existing_kernels(installed, config, tmp_path)
         }
     )
     robustness = run_robustness(robust)
+    assert robust.fingerprint_for_dataset(robustness.dataset.identity) == robustness.fingerprint
     assert verify(robustness.artifact_directory, deep=True).passed
 
 
@@ -749,3 +750,13 @@ def test_deferred_dataset_dependency_error_is_actionable(monkeypatch, installed,
     select(monkeypatch, replace(installed, datasets={"example.toy": missing}))
     with pytest.raises(ValueError, match="example.toy.*install dataset-extra"):
         run_benchmark_suite(config, persist=False)
+
+
+def test_activation_snapshots_revalidated_immutable_manifest(monkeypatch, installed, config):
+    mutable = list(installed.manifest.datasets)
+    unsafe_copy = installed.manifest.model_copy(update={"datasets": mutable})
+    select(monkeypatch, replace(installed, manifest=unsafe_copy))
+    bound, _ = runtime.activate(config)
+    mutable.clear()
+    assert len(bound.provider_manifests[0].datasets) == 1
+    assert isinstance(bound.provider_manifests[0].datasets, tuple)

@@ -140,7 +140,7 @@ def _load(
             or not callable(space.suggest)
         ):
             raise ValueError(f"search space identity disagrees: {space_declaration.id}")
-    return provider, _describe(entry)
+    return replace(provider, manifest=manifest), _describe(entry)
 
 
 def resolve(refs: tuple[ProviderRef, ...]) -> ResolvedProviders:
