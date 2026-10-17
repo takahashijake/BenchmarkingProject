@@ -18,6 +18,29 @@ five workflow levels:
 AutoML is compute-aware orchestration over the existing search layer, not automatic pipeline
 invention.
 
+## Versioned providers (v0.12)
+
+Install and explicitly activate third-party datasets, sklearn estimators, metrics
+and search spaces through the existing scientific workflows. Discovery reads
+package metadata; activation requires an experiment selection and implementation
+version pin. Built-in-only configurations keep their historical semantics.
+
+```bash
+python -m pip install ./examples/provider
+benchforge plugins list
+benchforge plugins inspect example --version 1.0.0
+benchforge benchmark configs/providers/benchmark.yaml
+benchforge search configs/providers/search.yaml
+```
+
+See [provider installation, authoring, API and reproducibility](docs/providers.md)
+and [v0.12 architecture decisions](docs/v0.12-providers.md). External providers
+currently require serial execution without hard budgets; serial benchmark
+checkpoint/resume is supported. Activated plugins are trusted executable Python.
+Offline verification never imports them and reports custom metric recomputation
+as unavailable. Feature milestone numbers do not change the historical 0.8.0
+package/evaluator version in this implementation.
+
 ## Durable benchmark resume (v0.10)
 
 Long-running fixed benchmarks can now reuse verified completed candidates after an interruption.

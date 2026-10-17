@@ -264,3 +264,27 @@ part of the default suite.
 POSIX parallel and budgeted fixed benchmarks use isolated subprocess groups with
 bounded scheduling and coordinator-owned checkpoint commits. Scientific fitting
 still delegates to `execution.runner`. See [v0.11 decision and lifecycle](v0.11-execution.md).
+
+
+## V0.12 explicit provider boundary
+
+Data-only, frozen versioned declarations live in `core.provider_config`.
+`providers.runtime` distinguishes installed metadata discovery from explicit,
+version-pinned activation and composes new instance-local registries. Dataset
+validation and content identity occur before the scientific kernel; estimator
+factories are cloned and receive central seeds. Metric declarations augment the
+built-in enum without changing it. The existing fold evaluator handles all tasks
+and passes private arrays to activated metric callbacks. Search spaces retain the
+existing proposal and fixed-parameter contract.
+
+Resolved declarations enter canonical configs and all workflow fingerprints;
+empty provider fields are omitted for historical identity compatibility.
+Installed distribution details remain separate provenance. Checkpoints retain
+the existing format and atomic ownership rules. Offline verification validates
+declarations and redundant evidence without importing providers and warns when
+custom metric semantics cannot be recomputed. External providers with parallel
+workers or hard budgets fail before activation. Public package exports load on
+demand, avoiding scientific-library startup costs for trivial supervised workers.
+
+See [the architecture decision](v0.12-providers.md) and
+[provider contracts, examples and limits](providers.md).

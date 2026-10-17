@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — v0.12 versioned providers
+
+- Add explicit, version-pinned installed providers for datasets, estimators, metrics and search spaces.
+- Separate metadata discovery from trusted activation; add plugins list/inspect diagnostics.
+- Integrate serial run, benchmark, search, robustness and AutoML with the existing evaluator.
+- Include resolved scientific declarations and dataset content in identity; seal separate distribution provenance.
+- Support serial provider checkpoint/resume and reject provider workers/hard budgets explicitly.
+- Keep verification/catalog ingestion independent of provider execution; report custom-score verification limits.
+- Add a standalone example distribution, installed CLI/API tests and wheel smoke checks on both CI versions.
+- Correct eager worker imports that caused baseline timeout regressions; preserve original timeout assertions.
+
 ## Unreleased — v0.10 checkpoint recovery slice
 
 - Add opt-in durable candidate checkpoint workspaces for fixed benchmarks.
