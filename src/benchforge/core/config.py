@@ -4,10 +4,16 @@ import hashlib
 import json
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+
+from benchforge.core.provider_config import ProviderManifest, ProviderRef, validate_identifier
+
+if TYPE_CHECKING:
+    from benchforge.evaluation.metrics import MetricSpec
+    from benchforge.providers.runtime import ResolvedProviders
 
 
 class StrictModel(BaseModel):
@@ -36,6 +42,100 @@ class MetricName(StrEnum):
     MEAN_ABSOLUTE_ERROR = "mean_absolute_error"
     ROOT_MEAN_SQUARED_ERROR = "root_mean_squared_error"
     R2 = "r2"
+
+
+class ExternalMetric(str):
+    """Namespaced metric identifier; built-in enum values retain their public API."""
+
+    def __new__(cls, value: str) -> ExternalMetric:
+        validate_identifier(value)
+        if "." not in value:
+            raise ValueError("external metrics must use a provider namespace")
+        return super().__new__(cls, value)
+
+    @property
+    def value(self) -> str:
+        return str(self)
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
+        from pydantic_core import core_schema
+
+        return core_schema.no_info_after_validator_function(cls, core_schema.str_schema())
+
+
+MetricIdentifier = MetricName | ExternalMetric
+
+
+def parse_metric(value: str) -> MetricIdentifier:
+    try:
+        return MetricName(value)
+    except ValueError:
+        return ExternalMetric(value)
+
+
+class ExperimentConfig(StrictModel):
+    task: TaskType
+    providers: tuple[ProviderRef, ...] = ()
+    provider_manifests: tuple[ProviderManifest, ...] = ()
+    _provider_runtime: ResolvedProviders | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def provider_contract(self) -> ExperimentConfig:
+        refs = {p.id: p.version for p in self.providers}
+        if len(refs) != len(self.providers):
+            raise ValueError("duplicate provider identifier")
+        manifests = {p.id: p.version for p in self.provider_manifests}
+        if len(manifests) != len(self.provider_manifests):
+            raise ValueError("duplicate provider manifest")
+        if manifests and manifests != refs:
+            raise ValueError("provider manifests disagree with selected provider versions")
+        for metric in getattr(self, "metrics", ()):
+            if isinstance(metric, ExternalMetric) and not any(
+                metric.startswith(provider.id + ".") for provider in self.providers
+            ):
+                raise ValueError(
+                    f"external metric '{metric}' requires an explicit provider selection"
+                )
+        return self
+
+    def provider_semantics(self, data: dict[str, Any]) -> dict[str, Any]:
+        if not self.providers:
+            data.pop("providers", None)
+            data.pop("provider_manifests", None)
+        else:
+            data["providers"] = sorted(data["providers"], key=lambda p: p["id"])
+            data["provider_manifests"] = [
+                p.canonical_dict() for p in sorted(self.provider_manifests, key=lambda p: p.id)
+            ]
+        return data
+
+    def metric_spec(self, name: MetricIdentifier) -> MetricSpec:
+        from benchforge.evaluation.metrics import metric_spec
+
+        return metric_spec(name, self.provider_manifests)
+
+    def provider_metadata(self) -> dict[str, Any]:
+        if not self.providers:
+            return {}
+        from dataclasses import asdict
+
+        return {
+            "provider_schema_version": 1,
+            "provider_manifests": [
+                m.canonical_dict() for m in sorted(self.provider_manifests, key=lambda m: m.id)
+            ],
+            "provider_distributions": [asdict(p) for p in self._provider_runtime.provenance]
+            if self._provider_runtime
+            else [],
+        }
+
+    def extension_fields(self) -> dict[str, Any]:
+        return {"providers": self.providers, "provider_manifests": self.provider_manifests}
+
+    def bind_child(self, child: RunConfig) -> RunConfig:
+        child._provider_runtime = self._provider_runtime
+        return child
 
 
 class DatasetConfig(StrictModel):
@@ -106,22 +206,22 @@ class OutputConfig(StrictModel):
     directory: Path = Path("artifacts")
 
 
-class RunConfig(StrictModel):
+class RunConfig(ExperimentConfig):
     schema_version: Literal[1] = 1
     task: TaskType
     dataset: DatasetSourceConfig
     split: SplitConfig
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     model: ModelConfig
-    metrics: tuple[MetricName, ...]
+    metrics: tuple[MetricIdentifier, ...]
     seed: int = Field(default=42, ge=0, le=2**32 - 1)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
     @field_validator("metrics")
     @classmethod
     def metrics_are_nonempty_and_unique(
-        cls, value: tuple[MetricName, ...]
-    ) -> tuple[MetricName, ...]:
+        cls, value: tuple[MetricIdentifier, ...]
+    ) -> tuple[MetricIdentifier, ...]:
         if not value:
             raise ValueError("at least one metric is required")
         if len(set(value)) != len(value):
@@ -132,11 +232,11 @@ class RunConfig(StrictModel):
     def metrics_match_task(self) -> RunConfig:
         if isinstance(self.dataset, FileDatasetConfig) and self.dataset.task != self.task:
             raise ValueError("file dataset task must match the run task")
-        _validate_task_semantics(self.task, self.split, self.metrics)
+        _validate_task_semantics(self.task, self.split, self.metrics, self.provider_manifests)
         return self
 
     def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
-        data = self.model_dump(mode="json", exclude_none=True)
+        data = self.provider_semantics(self.model_dump(mode="json", exclude_none=True))
         if not include_output:
             data.pop("output", None)
         return data
@@ -182,15 +282,15 @@ def load_run_config(path: str | Path) -> RunConfig:
     return RunConfig.model_validate(raw)
 
 
-class BenchmarkConfig(StrictModel):
+class BenchmarkConfig(ExperimentConfig):
     schema_version: Literal[1] = 1
     task: TaskType
     dataset: DatasetSourceConfig
     split: SplitConfig
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     models: tuple[ModelConfig, ...]
-    metrics: tuple[MetricName, ...]
-    primary_metric: MetricName
+    metrics: tuple[MetricIdentifier, ...]
+    primary_metric: MetricIdentifier
     seed: int = Field(default=42, ge=0, le=2**32 - 1)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
@@ -215,8 +315,8 @@ class BenchmarkConfig(StrictModel):
     @field_validator("metrics")
     @classmethod
     def benchmark_metrics_are_nonempty_and_unique(
-        cls, value: tuple[MetricName, ...]
-    ) -> tuple[MetricName, ...]:
+        cls, value: tuple[MetricIdentifier, ...]
+    ) -> tuple[MetricIdentifier, ...]:
         if not value:
             raise ValueError("at least one metric is required")
         if len(set(value)) != len(value):
@@ -229,11 +329,11 @@ class BenchmarkConfig(StrictModel):
             raise ValueError("file dataset task must match the benchmark task")
         if self.primary_metric not in self.metrics:
             raise ValueError("primary_metric must also be present in metrics")
-        _validate_task_semantics(self.task, self.split, self.metrics)
+        _validate_task_semantics(self.task, self.split, self.metrics, self.provider_manifests)
         return self
 
     def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
-        data = self.model_dump(mode="json", exclude_none=True)
+        data = self.provider_semantics(self.model_dump(mode="json", exclude_none=True))
         data["models"] = sorted(
             data["models"],
             key=lambda model: json.dumps(model, sort_keys=True, separators=(",", ":")),
@@ -264,15 +364,18 @@ class BenchmarkConfig(StrictModel):
         return hashlib.sha256(canonical.encode()).hexdigest()
 
     def to_run_config(self, model: ModelConfig) -> RunConfig:
-        return RunConfig(
-            task=self.task,
-            dataset=self.dataset,
-            split=self.split,
-            preprocessing=self.preprocessing,
-            model=model,
-            metrics=self.metrics,
-            seed=self.seed,
-            output=self.output,
+        return self.bind_child(
+            RunConfig(
+                **self.extension_fields(),
+                task=self.task,
+                dataset=self.dataset,
+                split=self.split,
+                preprocessing=self.preprocessing,
+                model=model,
+                metrics=self.metrics,
+                seed=self.seed,
+                output=self.output,
+            )
         )
 
 
@@ -342,7 +445,7 @@ class AutoMLModelPolicy(StrictModel):
         return self
 
 
-class SearchConfig(StrictModel):
+class SearchConfig(ExperimentConfig):
     schema_version: Literal[1] = 1
     task: TaskType
     dataset: DatasetSourceConfig
@@ -350,8 +453,8 @@ class SearchConfig(StrictModel):
     inner_split: SplitConfig
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     models: tuple[SearchModelConfig, ...]
-    metrics: tuple[MetricName, ...]
-    primary_metric: MetricName
+    metrics: tuple[MetricIdentifier, ...]
+    primary_metric: MetricIdentifier
     budget: SearchBudget
     final_search: FinalSearchConfig = Field(default_factory=FinalSearchConfig)
     seed: int = Field(default=42, ge=0, le=2**32 - 1)
@@ -374,8 +477,8 @@ class SearchConfig(StrictModel):
     @field_validator("metrics")
     @classmethod
     def search_metrics_are_nonempty_and_unique(
-        cls, value: tuple[MetricName, ...]
-    ) -> tuple[MetricName, ...]:
+        cls, value: tuple[MetricIdentifier, ...]
+    ) -> tuple[MetricIdentifier, ...]:
         if not value:
             raise ValueError("at least one metric is required")
         if len(set(value)) != len(value):
@@ -388,12 +491,12 @@ class SearchConfig(StrictModel):
             raise ValueError("file dataset task must match the search task")
         if self.primary_metric not in self.metrics:
             raise ValueError("primary_metric must also be present in metrics")
-        _validate_task_semantics(self.task, self.outer_split, self.metrics)
-        _validate_task_semantics(self.task, self.inner_split, self.metrics)
+        _validate_task_semantics(self.task, self.outer_split, self.metrics, self.provider_manifests)
+        _validate_task_semantics(self.task, self.inner_split, self.metrics, self.provider_manifests)
         return self
 
     def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
-        data = self.model_dump(mode="json", exclude_none=True)
+        data = self.provider_semantics(self.model_dump(mode="json", exclude_none=True))
         data["models"] = sorted(
             data["models"],
             key=lambda model: json.dumps(model, sort_keys=True, separators=(",", ":")),
@@ -425,15 +528,18 @@ class SearchConfig(StrictModel):
         split: SplitConfig,
         seed: int,
     ) -> RunConfig:
-        return RunConfig(
-            task=self.task,
-            dataset=self.dataset,
-            split=split,
-            preprocessing=self.preprocessing,
-            model=model,
-            metrics=self.metrics,
-            seed=seed,
-            output=self.output,
+        return self.bind_child(
+            RunConfig(
+                **self.extension_fields(),
+                task=self.task,
+                dataset=self.dataset,
+                split=split,
+                preprocessing=self.preprocessing,
+                model=model,
+                metrics=self.metrics,
+                seed=seed,
+                output=self.output,
+            )
         )
 
 
@@ -450,15 +556,15 @@ def load_search_config(path: str | Path) -> SearchConfig:
     return SearchConfig.model_validate(raw)
 
 
-class AutoMLConfig(StrictModel):
+class AutoMLConfig(ExperimentConfig):
     schema_version: Literal[1] = 1
     task: TaskType
     dataset: DatasetSourceConfig
     outer_split: SplitConfig
     inner_split: SplitConfig
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
-    metrics: tuple[MetricName, ...]
-    primary_metric: MetricName
+    metrics: tuple[MetricIdentifier, ...]
+    primary_metric: MetricIdentifier
     budget: AutoMLBudget
     models: AutoMLModelPolicy = Field(default_factory=AutoMLModelPolicy)
     seed: int = Field(default=42, ge=0, le=2**32 - 1)
@@ -467,8 +573,8 @@ class AutoMLConfig(StrictModel):
     @field_validator("metrics")
     @classmethod
     def automl_metrics_are_nonempty_and_unique(
-        cls, value: tuple[MetricName, ...]
-    ) -> tuple[MetricName, ...]:
+        cls, value: tuple[MetricIdentifier, ...]
+    ) -> tuple[MetricIdentifier, ...]:
         if not value:
             raise ValueError("at least one metric is required")
         if len(set(value)) != len(value):
@@ -481,12 +587,12 @@ class AutoMLConfig(StrictModel):
             raise ValueError("file dataset task must match the AutoML task")
         if self.primary_metric not in self.metrics:
             raise ValueError("primary_metric must also be present in metrics")
-        _validate_task_semantics(self.task, self.outer_split, self.metrics)
-        _validate_task_semantics(self.task, self.inner_split, self.metrics)
+        _validate_task_semantics(self.task, self.outer_split, self.metrics, self.provider_manifests)
+        _validate_task_semantics(self.task, self.inner_split, self.metrics, self.provider_manifests)
         return self
 
     def canonical_dict(self, *, include_output: bool = True) -> dict[str, Any]:
-        data = self.model_dump(mode="json", exclude_none=True)
+        data = self.provider_semantics(self.model_dump(mode="json", exclude_none=True))
         data["models"]["include"] = sorted(data["models"]["include"])
         data["models"]["exclude"] = sorted(data["models"]["exclude"])
         if not include_output:
@@ -543,7 +649,10 @@ def load_automl_config(path: str | Path) -> AutoMLConfig:
 
 
 def _validate_task_semantics(
-    task: TaskType, split: SplitConfig, metrics: tuple[MetricName, ...]
+    task: TaskType,
+    split: SplitConfig,
+    metrics: tuple[MetricIdentifier, ...],
+    manifests: tuple[ProviderManifest, ...] = (),
 ) -> None:
     expected_split = "stratified_kfold" if task.is_classification else "kfold"
     if split.strategy != expected_split:
@@ -556,7 +665,10 @@ def _validate_task_semantics(
     from benchforge.evaluation.metrics import metric_spec
 
     incompatible = [
-        metric.value for metric in metrics if not metric_spec(metric).supports_task(task)
+        metric.value
+        for metric in metrics
+        if (isinstance(metric, MetricName) or manifests)
+        and not metric_spec(metric, manifests).supports_task(task)
     ]
     if incompatible:
         raise ValueError(f"metrics {', '.join(incompatible)} are incompatible with task '{task}'")

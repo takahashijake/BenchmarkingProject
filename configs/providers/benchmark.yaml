@@ -1,0 +1,12 @@
+schema_version: 1
+providers: [{id: example, version: 1.0.0}]
+task: binary_classification
+dataset: {name: example.toy}
+split: {strategy: stratified_kfold, n_splits: 3, shuffle: true}
+models:
+  - {name: example.logistic, id: plugin, parameters: {max_iter: 100}}
+  - {name: dummy_classifier, id: baseline}
+metrics: [accuracy, example.agreement]
+primary_metric: example.agreement
+seed: 42
+output: {directory: artifacts/providers}

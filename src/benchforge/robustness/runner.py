@@ -13,7 +13,7 @@ from benchforge.data.registry import (
     default_dataset_registry,
     summarize_dataset,
 )
-from benchforge.evaluation.metrics import aggregate_fold_metrics, metric_spec
+from benchforge.evaluation.metrics import aggregate_fold_metrics
 from benchforge.execution.runner import FoldExecutionError, PredictionRecord, execute_fold
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.robustness.config import RobustnessConfig
@@ -176,10 +176,21 @@ def run_robustness(
     model_registry: ModelRegistry = default_model_registry,
     persist: bool = True,
 ) -> RobustnessResult:
+    from benchforge.providers.runtime import activate
+
+    config, provider_runtime = activate(config)
+    if provider_runtime is not None:
+        if dataset_registry not in (default_dataset_registry, provider_runtime.datasets):
+            raise ValueError("cannot combine provider activation with custom dataset registries")
+        if model_registry not in (default_model_registry, provider_runtime.models):
+            raise ValueError("cannot combine provider activation with custom model registries")
+        dataset_registry = provider_runtime.datasets
+        model_registry = provider_runtime.models
+
     started = perf_counter()
     dataset = dataset_registry.resolve(config.dataset)
     plan = build_robustness_plan(config, dataset, model_registry)
-    direction = metric_spec(config.primary_metric).direction
+    direction = config.metric_spec(config.primary_metric).direction
     models = sorted(config.models, key=lambda model: model.id or model.name)
     repetitions = []
     observations = []

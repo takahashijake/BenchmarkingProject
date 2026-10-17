@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from types import MappingProxyType
 from typing import Any
 
@@ -20,9 +21,14 @@ class SearchSpaceRegistry:
     def __init__(self, spaces: dict[str, SearchSpace]) -> None:
         self._spaces = MappingProxyType(dict(spaces))
 
+    def extended(self, spaces: dict[str, SearchSpace]) -> SearchSpaceRegistry:
+        if set(spaces) & set(self._spaces):
+            raise ValueError("duplicate search-space identifier")
+        return SearchSpaceRegistry({**self._spaces, **deepcopy(spaces)})
+
     def resolve(self, model_name: str) -> SearchSpace:
         try:
-            return self._spaces[model_name]
+            return deepcopy(self._spaces[model_name])
         except KeyError as exc:
             supported = ", ".join(sorted(self._spaces))
             raise ValueError(

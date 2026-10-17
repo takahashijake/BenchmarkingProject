@@ -6,7 +6,7 @@ from types import MappingProxyType
 from typing import Any
 
 from sklearn import __version__ as sklearn_version
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone, is_classifier, is_regressor
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.ensemble import (
     ExtraTreesClassifier,
@@ -108,13 +108,40 @@ class ModelRegistry:
         }
         self._specs = MappingProxyType(specs)
 
+    def extended(self, specs: dict[str, ModelSpec]) -> ModelRegistry:
+        if set(specs) & set(self._specs):
+            raise ValueError("duplicate estimator identifier")
+
+        def fresh(spec: ModelSpec) -> ModelSpec:
+            def factory(parameters: dict[str, Any], seed: int) -> BaseEstimator:
+                estimator = spec.factory(parameters, seed)
+                if not isinstance(estimator, BaseEstimator):
+                    raise ValueError("provider factory must return a sklearn BaseEstimator")
+                estimator = clone(estimator)
+                if "random_state" in estimator.get_params(deep=False):
+                    estimator.set_params(random_state=seed)
+                if any(
+                    task.is_classification for task in spec.supported_tasks
+                ) and not is_classifier(estimator):
+                    raise ValueError(
+                        "provider declared classification but returned wrong estimator task"
+                    )
+                if TaskType.REGRESSION in spec.supported_tasks and not is_regressor(estimator):
+                    raise ValueError(
+                        "provider declared regression but returned wrong estimator task"
+                    )
+                return estimator
+
+            return ModelSpec(factory, spec.supported_tasks, spec.capabilities)
+
+        return ModelRegistry({**self._specs, **{name: fresh(spec) for name, spec in specs.items()}})
+
     def create(self, config: ModelConfig, seed: int, task: TaskType | None = None) -> BaseEstimator:
         spec = self._resolve(config.name)
         if task is not None and not spec.supports_task(task):
             supported = ", ".join(sorted(item.value for item in spec.supported_tasks))
             raise ValueError(
-                f"model '{config.name}' supports tasks [{supported}], "
-                f"not configured task '{task}'"
+                f"model '{config.name}' supports tasks [{supported}], not configured task '{task}'"
             )
         try:
             return spec.factory(dict(config.parameters), seed)

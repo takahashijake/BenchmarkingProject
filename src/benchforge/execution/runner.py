@@ -9,6 +9,7 @@ import numpy as np
 from sklearn.pipeline import Pipeline
 
 from benchforge.core.config import RunConfig, TaskType
+from benchforge.core.provider_config import ProviderManifest
 from benchforge.data.registry import (
     Dataset,
     DatasetRegistry,
@@ -20,7 +21,6 @@ from benchforge.evaluation.metrics import (
     AggregateMetric,
     aggregate_fold_metrics,
     compute_metrics,
-    metric_spec,
 )
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.preprocessing.builder import build_preprocessor
@@ -56,6 +56,7 @@ class RunResult:
     aggregate_metrics: dict[str, AggregateMetric]
     predictions: tuple[PredictionRecord, ...]
     artifact_directory: Path | None = None
+    provider_manifests: tuple[ProviderManifest, ...] = ()
 
 
 class FoldExecutionError(RuntimeError):
@@ -110,7 +111,7 @@ def execute_fold(
             truth = validation_y.to_numpy(dtype=np.int64)
             score = (
                 _prediction_score(pipeline, validation_x)
-                if any(metric_spec(metric).requires_score for metric in config.metrics)
+                if any(config.metric_spec(metric).requires_score for metric in config.metrics)
                 else None
             )
         elif config.task == TaskType.REGRESSION:
@@ -119,20 +120,22 @@ def execute_fold(
             score = None
         else:  # pragma: no cover - TaskType validation is exhaustive
             raise ValueError(f"unsupported task '{config.task}'")
-        metrics = compute_metrics(config.metrics, truth, predicted, score, config.task)
+        metrics = compute_metrics(
+            config.metrics,
+            truth,
+            predicted,
+            score,
+            config.task,
+            manifests=config.provider_manifests,
+            functions=(config._provider_runtime.metrics if config._provider_runtime else None),
+        )
         fold_result = FoldResult(fold.fold_id, len(train_x), len(validation_x), metrics)
         predictions = tuple(
             PredictionRecord(
                 sample_index=int(sample_index),
                 fold_id=fold.fold_id,
-                truth=(
-                    int(actual) if config.task.is_classification else float(actual)
-                ),
-                prediction=(
-                    int(estimate)
-                    if config.task.is_classification
-                    else float(estimate)
-                ),
+                truth=(int(actual) if config.task.is_classification else float(actual)),
+                prediction=(int(estimate) if config.task.is_classification else float(estimate)),
                 score=None if score is None else float(score[position]),
             )
             for position, (sample_index, actual, estimate) in enumerate(
@@ -156,6 +159,17 @@ def run_benchmark(
     dataset: Dataset | None = None,
     folds: tuple[Fold, ...] | None = None,
 ) -> RunResult:
+    from benchforge.providers.runtime import activate
+
+    config, provider_runtime = activate(config)
+    if provider_runtime is not None:
+        if dataset_registry not in (default_dataset_registry, provider_runtime.datasets):
+            raise ValueError("cannot combine provider activation with custom dataset registries")
+        if model_registry not in (default_model_registry, provider_runtime.models):
+            raise ValueError("cannot combine provider activation with custom model registries")
+        dataset_registry = provider_runtime.datasets
+        model_registry = provider_runtime.models
+
     random.seed(config.seed)
     np.random.seed(config.seed)
     if dataset is None:
@@ -181,6 +195,7 @@ def run_benchmark(
         predictions.extend(fold_predictions)
 
     result = RunResult(
+        provider_manifests=config.provider_manifests,
         fingerprint=config.fingerprint_for_dataset(dataset.identity),
         dataset_identity=dataset.identity,
         dataset=summarize_dataset(dataset),

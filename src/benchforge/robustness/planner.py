@@ -59,6 +59,16 @@ def build_robustness_plan(
     *,
     dataset_registry: DatasetRegistry = default_dataset_registry,
 ) -> RobustnessPlan:
+    from benchforge.providers.runtime import activate
+
+    config, runtime = activate(config)
+    if runtime:
+        if model_registry not in (default_model_registry, runtime.models):
+            raise ValueError("cannot combine providers with custom model registries")
+        if dataset_registry not in (default_dataset_registry, runtime.datasets):
+            raise ValueError("cannot combine providers with custom dataset registries")
+        model_registry = runtime.models
+        dataset_registry = runtime.datasets
     if dataset is None:
         dataset = dataset_registry.resolve(config.dataset)
     if dataset.task != config.task:
@@ -96,6 +106,14 @@ def robustness_fingerprint(
     dataset_identity: str,
     model_registry: ModelRegistry = default_model_registry,
 ) -> str:
+    if config.providers:
+        from benchforge.providers.runtime import activate
+
+        config, runtime = activate(config)
+        if runtime is not None:
+            if model_registry not in (default_model_registry, runtime.models):
+                raise ValueError("cannot combine providers with custom model registries")
+            model_registry = runtime.models
     semantics = config.canonical_dict(include_output=False)
     semantics["dataset"].pop("path", None)
     identity = {

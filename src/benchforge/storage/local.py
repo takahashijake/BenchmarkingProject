@@ -41,6 +41,7 @@ class LocalArtifactStore:
         directory.mkdir(parents=True, exist_ok=False)
         self._write_json(directory / "config.json", config.canonical_dict())
         metadata = {
+            **config.provider_metadata(),
             "created_at": timestamp.isoformat(),
             "benchforge_version": __version__,
             "python_version": platform.python_version(),

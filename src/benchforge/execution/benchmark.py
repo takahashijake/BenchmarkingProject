@@ -8,6 +8,7 @@ from pathlib import Path
 from time import monotonic, perf_counter, process_time
 
 from benchforge.core.config import BenchmarkConfig, ModelConfig
+from benchforge.core.provider_config import ProviderManifest
 from benchforge.data.registry import (
     Dataset,
     DatasetRegistry,
@@ -15,7 +16,7 @@ from benchforge.data.registry import (
     default_dataset_registry,
     summarize_dataset,
 )
-from benchforge.evaluation.metrics import AggregateMetric, metric_spec
+from benchforge.evaluation.metrics import AggregateMetric
 from benchforge.execution.checkpoints import CheckpointWorkspace, _write_atomic
 from benchforge.execution.runner import RunResult, run_benchmark
 from benchforge.execution.supervisor import ExecutionOptions, supervise
@@ -77,6 +78,7 @@ class BenchmarkResult:
     checkpoint_invalid: tuple[str, ...] = ()
     execution_diagnostics: tuple[ExecutionDiagnostic, ...] = ()
     execution_options: ExecutionOptions | None = None
+    provider_manifests: tuple[ProviderManifest, ...] = ()
 
 
 def _build_leaderboard(
@@ -183,6 +185,19 @@ def run_benchmark_suite(
     execution_options: ExecutionOptions | None = None,
 ) -> BenchmarkResult:
     """Evaluate shared folds with optional verified candidate-level recovery."""
+    if config.providers and (workers != 1 or (execution_options and execution_options.bounded)):
+        raise ValueError("external providers require serial execution without hard budgets")
+    from benchforge.providers.runtime import activate
+
+    config, provider_runtime = activate(config)
+    if provider_runtime is not None:
+        if dataset_registry not in (default_dataset_registry, provider_runtime.datasets):
+            raise ValueError("cannot combine provider activation with custom dataset registries")
+        if model_registry not in (default_model_registry, provider_runtime.models):
+            raise ValueError("cannot combine provider activation with custom model registries")
+        dataset_registry = provider_runtime.datasets
+        model_registry = provider_runtime.models
+
     started = perf_counter()
     options = execution_options or ExecutionOptions()
     deadline = monotonic() + options.run_timeout if options.run_timeout is not None else None
@@ -190,7 +205,11 @@ def run_benchmark_suite(
         raise ValueError("budgeted benchmark requires the default model registry")
     if resume and checkpoint_dir is None:
         raise ValueError("resume requires a checkpoint_dir")
-    if checkpoint_dir is not None and model_registry is not default_model_registry:
+    if (
+        checkpoint_dir is not None
+        and model_registry is not default_model_registry
+        and provider_runtime is None
+    ):
         raise ValueError("checkpointing requires the versioned default model registry")
     dataset = dataset_registry.resolve(config.dataset)
     if dataset.task != config.task:
@@ -359,6 +378,7 @@ def run_benchmark_suite(
 
         primary_metric = config.primary_metric.value
         result = BenchmarkResult(
+            provider_manifests=config.provider_manifests,
             fingerprint=config.fingerprint_for_dataset(dataset.identity),
             dataset=summarize_dataset(dataset),
             primary_metric=primary_metric,
@@ -369,7 +389,7 @@ def run_benchmark_suite(
                 valid_candidates,
                 valid_failures,
                 primary_metric,
-                metric_spec(config.primary_metric).direction,
+                config.metric_spec(config.primary_metric).direction,
             ),
             total_duration_seconds=perf_counter() - started,
             execution_diagnostics=tuple(diagnostics[m.id or m.name] for m in config.models)

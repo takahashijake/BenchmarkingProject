@@ -91,16 +91,21 @@ class DatasetRegistry:
     def __init__(self, loaders: dict[str, DatasetLoader]) -> None:
         self._loaders = MappingProxyType(dict(loaders))
 
+    def extended(self, loaders: dict[str, DatasetLoader]) -> DatasetRegistry:
+        if set(loaders) & set(self._loaders):
+            raise ValueError("duplicate dataset identifier")
+        return DatasetRegistry({**self._loaders, **loaders})
+
     def resolve(self, config: str | DatasetSourceConfig) -> Dataset:
         if isinstance(config, FileDatasetConfig):
             return load_tabular_dataset(config)
         name = config if isinstance(config, str) else config.name
         try:
-            dataset = self._loaders[name]()
+            loader = self._loaders[name]
         except KeyError as exc:
             supported = ", ".join(sorted(self._loaders))
             raise ValueError(f"unsupported dataset '{name}'; available: {supported}") from exc
-        return _copy_dataset(dataset)
+        return _copy_dataset(loader())
 
     @property
     def names(self) -> tuple[str, ...]:
