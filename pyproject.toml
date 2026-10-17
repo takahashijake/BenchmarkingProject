@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 dependencies = [
+  "filelock>=3.13",
   "numpy>=1.26",
   "optuna>=4.0",
   "pandas>=2.1",
@@ -17,10 +18,12 @@ dependencies = [
   "pydantic>=2.7",
   "PyYAML>=6.0",
   "scikit-learn>=1.4",
+  "threadpoolctl>=3.1",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2",
   "mypy>=1.11",
   "pandas-stubs>=2.1",
   "pytest>=8.0",
@@ -50,5 +53,5 @@ strict = true
 packages = ["benchforge"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "sklearn.*", "yaml"]
+module = ["pyarrow.*", "sklearn.*", "threadpoolctl.*", "yaml"]
 ignore_missing_imports = true
