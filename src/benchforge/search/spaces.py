@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,7 +28,7 @@ class SearchSpace:
         self, trial: optuna.trial.Trial, fixed: dict[str, JsonScalar]
     ) -> dict[str, JsonScalar]:
         """Propose only unfixed parameters; user-fixed values always win deliberately."""
-        proposed = self.suggest(trial, fixed)
+        proposed = self.suggest(trial, deepcopy(fixed))
         overlap = proposed.keys() & fixed.keys()
         if overlap:  # defensive: every built-in proposer filters fixed names
             names = ", ".join(sorted(overlap))

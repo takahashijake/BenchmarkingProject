@@ -27,10 +27,14 @@ class RobustnessConfig(BenchmarkConfig):
         if len(self.models) < 2:
             raise ValueError("robustness requires at least two candidate models")
         for model in self.models:
+            if model.name not in default_model_registry.names and self.providers:
+                continue
             if not default_model_registry.supports_task(model.name, self.task):
                 raise ValueError(f"model '{model.name}' is incompatible with task '{self.task}'")
         json.dumps(self.canonical_dict(include_output=False), allow_nan=False)
-        if isinstance(self.dataset, DatasetConfig):
+        if isinstance(self.dataset, DatasetConfig) and (
+            self.dataset.name in default_dataset_registry.names or not self.providers
+        ):
             dataset = default_dataset_registry.resolve(self.dataset)
             if dataset.task != self.task:
                 raise ValueError("dataset task must match the robustness task")

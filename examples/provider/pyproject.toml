@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "benchforge-example-provider"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = ["benchforge>=0.8.0"]
+
+[project.entry-points."benchforge.providers"]
+example = "benchforge_example:provider"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/benchforge_example"]

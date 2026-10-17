@@ -21,6 +21,20 @@ def run_automl(
     persist: bool = True,
 ) -> AutoMLResult:
     """Plan AutoML deterministically, then delegate all evaluation to ``run_search``."""
+    from benchforge.providers.runtime import activate
+
+    config, provider_runtime = activate(config)
+    if provider_runtime is not None:
+        if dataset_registry not in (default_dataset_registry, provider_runtime.datasets):
+            raise ValueError("cannot combine provider activation with custom dataset registries")
+        if model_registry not in (default_model_registry, provider_runtime.models):
+            raise ValueError("cannot combine provider activation with custom model registries")
+        dataset_registry = provider_runtime.datasets
+        model_registry = provider_runtime.models
+        if search_space_registry not in (default_search_space_registry, provider_runtime.spaces):
+            raise ValueError("cannot combine providers with custom search-space registries")
+        search_space_registry = provider_runtime.spaces
+
     started = perf_counter()
     dataset = dataset_registry.resolve(config.dataset)
     plan = build_automl_plan(
@@ -47,9 +61,9 @@ def run_automl(
     if persist:
         from benchforge.storage.automl import AutoMLArtifactStore
 
-        automl_directory, search_directory = AutoMLArtifactStore(
-            config.output.directory
-        ).write(config, result)
+        automl_directory, search_directory = AutoMLArtifactStore(config.output.directory).write(
+            config, result
+        )
         result = replace(
             result,
             search_result=replace(search_result, artifact_directory=search_directory),

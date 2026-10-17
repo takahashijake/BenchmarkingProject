@@ -41,6 +41,7 @@ class SearchArtifactStore:
         _write_json(
             directory / "metadata.json",
             {
+                **config.provider_metadata(),
                 "created_at": timestamp.isoformat(),
                 "benchforge_version": __version__,
                 "python_version": platform.python_version(),

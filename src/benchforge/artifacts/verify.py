@@ -31,7 +31,9 @@ from benchforge.core.config import (
     SearchConfig,
     SplitConfig,
     TaskType,
+    parse_metric,
 )
+from benchforge.core.provider_config import ProviderDistribution, ProviderManifest
 from benchforge.evaluation.metrics import aggregate_fold_metrics, compute_metrics, metric_spec
 
 REQUIRED = {
@@ -285,7 +287,13 @@ def _predictions(
                 else None
             )
             recomputed = compute_metrics(
-                tuple(MetricName(m) for m in config["metrics"]), truth, predicted, scores, task
+                tuple(
+                    MetricName(m) for m in config["metrics"] if m in MetricName._value2member_map_
+                ),
+                truth,
+                predicted,
+                scores,
+                task,
             )
             stored = (
                 dict((m["name"], m["value"]) for m in fold["metrics"])
@@ -345,6 +353,24 @@ def _describe(e: _Evidence, kind: ArtifactType, deep: bool) -> ArtifactDescripto
     # Robustness-specific validation is offline here: do not resolve dataset paths or registries.
     validation_config = {key: value for key, value in config.items() if key != "robustness"}
     validators[kind].model_validate(validation_config)
+    if config.get("providers"):
+        _check(bool(config.get("provider_manifests")), "missing resolved provider metadata")
+        _check(
+            type(metadata.get("provider_schema_version")) is int
+            and metadata["provider_schema_version"] == 1,
+            "unsupported provider metadata schema",
+        )
+        origins = metadata.get("provider_distributions")
+        _check(isinstance(origins, list), "missing installed provider provenance")
+        provenance = [ProviderDistribution.model_validate(item) for item in origins]
+        _check(
+            sorted(p.id for p in provenance) == sorted(p["id"] for p in config["providers"]),
+            "installed provider provenance coverage disagrees",
+        )
+        _check(
+            metadata.get("provider_manifests") == config["provider_manifests"],
+            "provider metadata disagrees with experiment configuration",
+        )
     if kind == ArtifactType.ROBUSTNESS:
         from benchforge.robustness.config import RobustnessSettings
 
@@ -369,7 +395,7 @@ def _describe(e: _Evidence, kind: ArtifactType, deep: bool) -> ArtifactDescripto
             "dataset summary identity/task disagrees",
         )
     metric = config.get("primary_metric")
-    direction = metric_spec(MetricName(metric)).direction if metric else None
+    direction = _declared_metric(config, metric).direction if metric else None
     _check(metadata.get("primary_metric", metric) == metric, "primary metric disagrees")
     _check(
         metadata.get("optimization_direction", direction) == direction,
@@ -383,6 +409,8 @@ def _describe(e: _Evidence, kind: ArtifactType, deep: bool) -> ArtifactDescripto
         for key in ("split", "outer_split", "inner_split", "robustness")
         if key in config
     }
+    if config.get("providers"):
+        evaluation["provider_manifests"] = config["provider_manifests"]
     evaluation["seed"] = config["seed"]
     evaluation["methodology_version"] = metadata.get("methodology_version")
     fold_assignment: list[Any] = []
@@ -860,7 +888,7 @@ def _search_candidate(
             _check(bool(completed), f"{path}: successful search has no completed trials")
             select = (
                 max
-                if metric_spec(MetricName(config["primary_metric"])).direction == "maximize"
+                if _declared_metric(config, config["primary_metric"]).direction == "maximize"
                 else min
             )
             best_score = select(float(trial["value"]) for trial in completed)
@@ -909,7 +937,7 @@ def _robustness(
     from benchforge.robustness.results import CandidateScore, RepetitionScores
     from benchforge.robustness.statistics import compare_all_pairs, rank_repetition, summarize_ranks
 
-    direction = metric_spec(MetricName(config["primary_metric"])).direction
+    direction = _declared_metric(config, config["primary_metric"]).direction
     observations: list[RepetitionScores] = []
     plan = e.get("repetition_plan.json")
     ids = [row["repetition_id"] for row in plan["repetitions"]]
@@ -1139,6 +1167,16 @@ def verify(
         kind = classify(path)
         evidence = _Evidence(path)
         descriptor = _describe(evidence, kind, deep)
+        artifact_config = evidence.get(CONFIG_FILES[kind])
+        if any(m not in MetricName._value2member_map_ for m in artifact_config.get("metrics", ())):
+            diagnostics.append(
+                Diagnostic(
+                    level="WARNING",
+                    code="external_metric_not_recomputed",
+                    message="External metrics were structurally checked; offline verification "
+                    "does not execute provider code or recompute custom metric semantics.",
+                )
+            )
         if manifest is None and descriptor.benchforge_version is not None and not _allow_unsealed:
             version_parts = descriptor.benchforge_version.split(".")
             if len(version_parts) >= 2 and all(part.isdigit() for part in version_parts[:2]):
@@ -1193,3 +1231,10 @@ def verify(
         diagnostics=tuple(diagnostics),
         deep=deep,
     )
+
+
+def _declared_metric(config: dict[str, Any], name: str) -> Any:
+    manifests = tuple(
+        ProviderManifest.model_validate(m) for m in config.get("provider_manifests", ())
+    )
+    return metric_spec(parse_metric(name), manifests)

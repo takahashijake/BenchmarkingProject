@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
         "robustness", help="evaluate stability with repeated matched cross-validation"
     )
     robustness_parser.add_argument("config", help="path to a YAML robustness configuration")
+    from benchforge.providers.cli import add_commands as add_plugin_commands
+
+    add_plugin_commands(subparsers)
     add_commands(subparsers)
     return parser
 
@@ -76,6 +79,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "plugins":
+            from benchforge.providers.cli import dispatch as dispatch_plugins
+
+            return dispatch_plugins(args)
         if args.command in {"verify", "catalog"}:
             return dispatch(args)
         if args.command == "run":

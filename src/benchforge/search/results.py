@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from benchforge.core.config import JsonScalar, SearchModelConfig
+from benchforge.core.provider_config import ProviderManifest
 from benchforge.data.registry import DatasetSummary
 from benchforge.evaluation.metrics import AggregateMetric
 from benchforge.execution.runner import FoldResult, PredictionRecord
@@ -117,3 +118,4 @@ class SearchResult:
     total_duration_seconds: float
     artifact_directory: Path | None = None
     search_space_identity: dict[str, Any] = field(default_factory=dict)
+    provider_manifests: tuple[ProviderManifest, ...] = ()

@@ -19,7 +19,7 @@ from benchforge.data.registry import (
     default_dataset_registry,
     summarize_dataset,
 )
-from benchforge.evaluation.metrics import aggregate_fold_metrics, metric_spec
+from benchforge.evaluation.metrics import aggregate_fold_metrics
 from benchforge.execution.runner import FoldExecutionError, execute_fold, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
 from benchforge.search.registry import SearchSpaceRegistry, default_search_space_registry
@@ -114,7 +114,7 @@ def _run_study(
     _validate_model_parameters(
         candidate, base_parameters, estimator_seed, model_registry, config.task
     )
-    direction = metric_spec(config.primary_metric).direction
+    direction = config.metric_spec(config.primary_metric).direction
 
     def objective(trial: optuna.trial.Trial) -> float:
         proposed = space.propose(trial, dict(candidate.parameters))
@@ -295,7 +295,7 @@ def _leaderboard(
     config: SearchConfig,
 ) -> tuple[TunedLeaderboardEntry, ...]:
     name = config.primary_metric.value
-    reverse = metric_spec(config.primary_metric).direction == "maximize"
+    reverse = config.metric_spec(config.primary_metric).direction == "maximize"
     ordered = sorted(
         families,
         key=lambda family: (
@@ -418,6 +418,20 @@ def run_search(
     dataset: Dataset | None = None,
 ) -> SearchResult:
     """Tune families inside outer training partitions and rank outer-fold evidence only."""
+    from benchforge.providers.runtime import activate
+
+    config, provider_runtime = activate(config)
+    if provider_runtime is not None:
+        if dataset_registry not in (default_dataset_registry, provider_runtime.datasets):
+            raise ValueError("cannot combine provider activation with custom dataset registries")
+        if model_registry not in (default_model_registry, provider_runtime.models):
+            raise ValueError("cannot combine provider activation with custom model registries")
+        dataset_registry = provider_runtime.datasets
+        model_registry = provider_runtime.models
+        if search_space_registry not in (default_search_space_registry, provider_runtime.spaces):
+            raise ValueError("cannot combine providers with custom search-space registries")
+        search_space_registry = provider_runtime.spaces
+
     started = perf_counter()
     dataset = dataset or dataset_registry.resolve(config.dataset)
     if dataset.task != config.task:
@@ -494,11 +508,12 @@ def run_search(
         else None
     )
     result = SearchResult(
+        provider_manifests=config.provider_manifests,
         fingerprint=fingerprint,
         search_space_identity=space_identity,
         dataset=summarize_dataset(dataset),
         primary_metric=config.primary_metric.value,
-        optimization_direction=metric_spec(config.primary_metric).direction,
+        optimization_direction=config.metric_spec(config.primary_metric).direction,
         outer_fold_count=len(outer_folds),
         inner_fold_count=config.inner_split.n_splits,
         outer_folds=outer_folds,

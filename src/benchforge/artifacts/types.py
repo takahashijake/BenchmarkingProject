@@ -38,6 +38,7 @@ class RepetitionSettings(EvidenceModel):
 
 
 class EvaluationEvidence(EvidenceModel):
+    provider_manifests: tuple[dict[str, Any], ...] = ()
     split: SplitConfig | None = None
     outer_split: SplitConfig | None = None
     inner_split: SplitConfig | None = None

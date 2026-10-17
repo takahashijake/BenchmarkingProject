@@ -72,6 +72,20 @@ def build_automl_plan(
     dataset: Dataset | None = None,
 ) -> AutoMLPlan:
     """Resolve policy into a deterministic ordinary nested-search configuration."""
+    from benchforge.providers.runtime import activate
+
+    config, provider_runtime = activate(config)
+    if provider_runtime is not None:
+        if dataset_registry not in (default_dataset_registry, provider_runtime.datasets):
+            raise ValueError("cannot combine provider activation with custom dataset registries")
+        if model_registry not in (default_model_registry, provider_runtime.models):
+            raise ValueError("cannot combine provider activation with custom model registries")
+        dataset_registry = provider_runtime.datasets
+        model_registry = provider_runtime.models
+        if search_space_registry not in (default_search_space_registry, provider_runtime.spaces):
+            raise ValueError("cannot combine providers with custom search-space registries")
+        search_space_registry = provider_runtime.spaces
+
     resolved_dataset = dataset or dataset_registry.resolve(config.dataset)
     if resolved_dataset.task != config.task:
         raise ValueError(
@@ -133,6 +147,7 @@ def build_automl_plan(
 
     final_trials = config.budget.final_search_trials
     generated = SearchConfig(
+        **config.extension_fields(),
         task=config.task,
         dataset=config.dataset,
         outer_split=config.outer_split,
@@ -152,6 +167,7 @@ def build_automl_plan(
         seed=config.seed,
         output=config.output,
     )
+    generated._provider_runtime = config._provider_runtime
     space_identity = search_space_registry.identity_for(set(searchable))
     search_fingerprint = generated.fingerprint_for_dataset(
         resolved_dataset.identity, space_identity

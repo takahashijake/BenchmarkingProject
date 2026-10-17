@@ -59,6 +59,12 @@ def build_robustness_plan(
     *,
     dataset_registry: DatasetRegistry = default_dataset_registry,
 ) -> RobustnessPlan:
+    from benchforge.providers.runtime import activate
+
+    config, runtime = activate(config)
+    if runtime:
+        model_registry = runtime.models
+        dataset_registry = runtime.datasets
     if dataset is None:
         dataset = dataset_registry.resolve(config.dataset)
     if dataset.task != config.task:

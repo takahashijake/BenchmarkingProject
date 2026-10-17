@@ -10,7 +10,6 @@ import hashlib
 import json
 import os
 import tempfile
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,9 +21,11 @@ from pydantic import TypeAdapter
 
 from benchforge._version import __version__
 from benchforge.core.config import BenchmarkConfig, ModelConfig
+from benchforge.data.identity import dataset_digest as _dataset_digest
 from benchforge.data.registry import Dataset
 from benchforge.evaluation.metrics import aggregate_fold_metrics
 from benchforge.execution.runner import RunResult
+from benchforge.providers.json import unique_object
 from benchforge.splits.stratified import Fold
 
 if TYPE_CHECKING:
@@ -44,21 +45,6 @@ def _canonical(value: Any) -> bytes:
 
 def _sha(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
-
-
-def _dataset_digest(dataset: Dataset) -> str:
-    """Hash resolved values, ordering, index, schema, and target, not a source path."""
-    digest = hashlib.sha256()
-    digest.update(_canonical({
-        "features": [(str(name), str(dtype)) for name, dtype in dataset.features.dtypes.items()],
-        "target_dtype": str(dataset.target.dtype),
-        "task": dataset.task.value,
-        "numeric": dataset.numeric_feature_names,
-        "categorical": dataset.categorical_feature_names,
-    }))
-    digest.update(pd.util.hash_pandas_object(dataset.features, index=True).to_numpy().tobytes())
-    digest.update(pd.util.hash_pandas_object(dataset.target, index=True).to_numpy().tobytes())
-    return digest.hexdigest()
 
 
 def experiment_identity(
@@ -113,7 +99,7 @@ def _write_atomic(path: Path, value: Any) -> None:
 def _read_regular_json(path: Path) -> Any:
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"unsafe or missing checkpoint file: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
 
 
 class CheckpointWorkspace:
@@ -235,6 +221,11 @@ class CheckpointWorkspace:
             if ModelConfig.model_validate(payload["model_config"]) != model:
                 raise ValueError("candidate configuration mismatch")
             run = _RUN_ADAPTER.validate_python(payload["run_result"])
+            if (
+                [m.canonical_dict() for m in run.provider_manifests]
+                != [m.canonical_dict() for m in self.config.provider_manifests]
+            ):
+                raise ValueError("checkpoint provider metadata disagrees with experiment")
             expected_run = self.config.to_run_config(model)
             if (
                 run.fingerprint != expected_run.fingerprint_for_dataset(self.dataset.identity)
@@ -276,7 +267,7 @@ class CheckpointWorkspace:
         payload = {
             "model_identifier": identifier,
             "model_config": candidate.model_config.model_dump(mode="json"),
-            "run_result": asdict(candidate.run_result),
+            "run_result": _RUN_ADAPTER.dump_python(candidate.run_result, mode="json"),
             "duration_seconds": candidate.duration_seconds,
         }
         envelope = {

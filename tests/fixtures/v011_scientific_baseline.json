@@ -1,0 +1,326 @@
+{
+  "breast_cancer": {
+    "candidates": [
+      {
+        "fingerprint": "b06741c552a21574c5354b43817d802b2674a9993b1f483155f5acc4c3af681b",
+        "id": "dummy_0",
+        "metrics": {
+          "accuracy": {
+            "mean": 0.6274204028589994,
+            "std": 0.0015621592306915618
+          },
+          "balanced_accuracy": {
+            "mean": 0.5,
+            "std": 0.0
+          },
+          "f1": {
+            "mean": 0.7710601157203097,
+            "std": 0.001178858024926099
+          },
+          "roc_auc": {
+            "mean": 0.5,
+            "std": 0.0
+          }
+        },
+        "prediction_by_fold": {
+          "0": 1,
+          "1": 1,
+          "2": 1
+        },
+        "score_by_fold": {
+          "0": 0.6279683377308707,
+          "1": 0.6279683377308707,
+          "2": 0.6263157894736842
+        }
+      },
+      {
+        "fingerprint": "66775081425b2b662a556e1af61faa5f4388aabe39a21c07ac86a107676da46e",
+        "id": "dummy_1",
+        "metrics": {
+          "accuracy": {
+            "mean": 0.6274204028589994,
+            "std": 0.0015621592306915618
+          },
+          "balanced_accuracy": {
+            "mean": 0.5,
+            "std": 0.0
+          },
+          "f1": {
+            "mean": 0.7710601157203097,
+            "std": 0.001178858024926099
+          },
+          "roc_auc": {
+            "mean": 0.5,
+            "std": 0.0
+          }
+        },
+        "prediction_by_fold": {
+          "0": 1,
+          "1": 1,
+          "2": 1
+        },
+        "score_by_fold": {
+          "0": 1.0,
+          "1": 1.0,
+          "2": 1.0
+        }
+      }
+    ],
+    "config": {
+      "dataset": {
+        "name": "breast_cancer"
+      },
+      "metrics": [
+        "accuracy",
+        "balanced_accuracy",
+        "f1",
+        "roc_auc"
+      ],
+      "models": [
+        {
+          "id": "dummy_0",
+          "name": "dummy_classifier",
+          "parameters": {
+            "strategy": "prior"
+          }
+        },
+        {
+          "id": "dummy_1",
+          "name": "dummy_classifier",
+          "parameters": {
+            "strategy": "most_frequent"
+          }
+        }
+      ],
+      "preprocessing": {
+        "median_imputation": true,
+        "standardize": true
+      },
+      "primary_metric": "roc_auc",
+      "schema_version": 1,
+      "seed": 42,
+      "split": {
+        "n_splits": 3,
+        "shuffle": true,
+        "strategy": "stratified_kfold"
+      },
+      "task": "binary_classification"
+    },
+    "fingerprint": "56f5a9fadc22c06f7ae439a4033fa78c40e7403b8d2a9a59760e9da3f62bf8e1",
+    "folds_sha256": "120d0a1681a8c916ed66476fbe4cef1cdd9c1b3eda71694a5df3c31d241e2f9b",
+    "ranking": [
+      "dummy_0",
+      "dummy_1"
+    ]
+  },
+  "diabetes_regression": {
+    "candidates": [
+      {
+        "fingerprint": "1020dafa67d85c88b858fed90164a56caff8e0a754496a96603b7a575a0b6ee2",
+        "id": "dummy_0",
+        "metrics": {
+          "mean_absolute_error": {
+            "mean": 65.86808989896157,
+            "std": 2.767985845158381
+          },
+          "r2": {
+            "mean": -0.0036109423304295043,
+            "std": 0.002476027587251089
+          },
+          "root_mean_squared_error": {
+            "mean": 77.03048325995833,
+            "std": 2.98137399526357
+          }
+        },
+        "prediction_by_fold": {
+          "0": 151.84013605442178,
+          "1": 150.38983050847457,
+          "2": 154.16949152542372
+        },
+        "score_by_fold": {
+          "0": null,
+          "1": null,
+          "2": null
+        }
+      },
+      {
+        "fingerprint": "7483ac1e2d4b34bd262b760a94fd6523497fc8c242dea6bea3caff52d73209ec",
+        "id": "dummy_1",
+        "metrics": {
+          "mean_absolute_error": {
+            "mean": 65.28770607342035,
+            "std": 1.7895966669557943
+          },
+          "r2": {
+            "mean": -0.03216748657078964,
+            "std": 0.028085290652168308
+          },
+          "root_mean_squared_error": {
+            "mean": 78.07571596925874,
+            "std": 2.133974019534292
+          }
+        },
+        "prediction_by_fold": {
+          "0": 141.0,
+          "1": 136.0,
+          "2": 144.0
+        },
+        "score_by_fold": {
+          "0": null,
+          "1": null,
+          "2": null
+        }
+      }
+    ],
+    "config": {
+      "dataset": {
+        "name": "diabetes"
+      },
+      "metrics": [
+        "root_mean_squared_error",
+        "mean_absolute_error",
+        "r2"
+      ],
+      "models": [
+        {
+          "id": "dummy_0",
+          "name": "dummy_regressor",
+          "parameters": {
+            "strategy": "mean"
+          }
+        },
+        {
+          "id": "dummy_1",
+          "name": "dummy_regressor",
+          "parameters": {
+            "strategy": "median"
+          }
+        }
+      ],
+      "preprocessing": {
+        "median_imputation": true,
+        "standardize": true
+      },
+      "primary_metric": "root_mean_squared_error",
+      "schema_version": 1,
+      "seed": 42,
+      "split": {
+        "n_splits": 3,
+        "shuffle": true,
+        "strategy": "kfold"
+      },
+      "task": "regression"
+    },
+    "fingerprint": "6fc9c74cc6b2553a6e569b47ec8aef0163afbd63ca6b5cd284dd085560dde691",
+    "folds_sha256": "d0b3abc058212521c06ff50e9dae6b27fe3c4a93b4b9a129b1d1b00cb9dd3e98",
+    "ranking": [
+      "dummy_0",
+      "dummy_1"
+    ]
+  },
+  "iris_multiclass": {
+    "candidates": [
+      {
+        "fingerprint": "f42aa05699147502d0991c7ac653887b8ce295d4830f9121c33640aa36e5289e",
+        "id": "dummy_0",
+        "metrics": {
+          "accuracy": {
+            "mean": 0.32,
+            "std": 0.0
+          },
+          "balanced_accuracy": {
+            "mean": 0.3333333333333333,
+            "std": 0.0
+          },
+          "f1_macro": {
+            "mean": 0.16161616161616163,
+            "std": 0.0
+          }
+        },
+        "prediction_by_fold": {
+          "0": 2,
+          "1": 1,
+          "2": 0
+        },
+        "score_by_fold": {
+          "0": null,
+          "1": null,
+          "2": null
+        }
+      },
+      {
+        "fingerprint": "bca85e6b494f25d0c2e1029b1b9b5f9c888908a74ba3c2540fcb914d45494137",
+        "id": "dummy_1",
+        "metrics": {
+          "accuracy": {
+            "mean": 0.32,
+            "std": 0.0
+          },
+          "balanced_accuracy": {
+            "mean": 0.3333333333333333,
+            "std": 0.0
+          },
+          "f1_macro": {
+            "mean": 0.16161616161616163,
+            "std": 0.0
+          }
+        },
+        "prediction_by_fold": {
+          "0": 2,
+          "1": 1,
+          "2": 0
+        },
+        "score_by_fold": {
+          "0": null,
+          "1": null,
+          "2": null
+        }
+      }
+    ],
+    "config": {
+      "dataset": {
+        "name": "iris"
+      },
+      "metrics": [
+        "accuracy",
+        "balanced_accuracy",
+        "f1_macro"
+      ],
+      "models": [
+        {
+          "id": "dummy_0",
+          "name": "dummy_classifier",
+          "parameters": {
+            "strategy": "prior"
+          }
+        },
+        {
+          "id": "dummy_1",
+          "name": "dummy_classifier",
+          "parameters": {
+            "strategy": "most_frequent"
+          }
+        }
+      ],
+      "preprocessing": {
+        "median_imputation": true,
+        "standardize": true
+      },
+      "primary_metric": "balanced_accuracy",
+      "schema_version": 1,
+      "seed": 42,
+      "split": {
+        "n_splits": 3,
+        "shuffle": true,
+        "strategy": "stratified_kfold"
+      },
+      "task": "multiclass_classification"
+    },
+    "fingerprint": "449a5afd301dcbac59fb4d1ff98c2226045d4c22f2b1f82ff44baa19243744aa",
+    "folds_sha256": "d649ba4f3f762038c4ea9bae00997145282c7676fe42417e4c30da5962275d92",
+    "ranking": [
+      "dummy_0",
+      "dummy_1"
+    ]
+  }
+}

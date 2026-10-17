@@ -1,0 +1,13 @@
+schema_version: 1
+providers: [{id: example, version: 1.0.0}]
+task: binary_classification
+dataset: {name: example.toy}
+outer_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+inner_split: {strategy: stratified_kfold, n_splits: 2, shuffle: true}
+models:
+  - {name: example.logistic, mode: search, parameters: {max_iter: 100}}
+metrics: [accuracy, example.agreement]
+primary_metric: example.agreement
+budget: {trials_per_outer_fold: 2}
+seed: 42
+output: {directory: artifacts/providers}

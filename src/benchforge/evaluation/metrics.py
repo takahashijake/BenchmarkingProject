@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from numbers import Real
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,7 +17,8 @@ from sklearn.metrics import (
     root_mean_squared_error,
 )
 
-from benchforge.core.config import MetricName, TaskType
+from benchforge.core.config import MetricIdentifier, MetricName, TaskType
+from benchforge.core.provider_config import ProviderManifest
 
 
 @dataclass(frozen=True)
@@ -27,7 +29,7 @@ class AggregateMetric:
 
 @dataclass(frozen=True)
 class MetricSpec:
-    name: MetricName
+    name: MetricIdentifier
     supported_tasks: frozenset[TaskType]
     direction: Literal["maximize", "minimize"]
     requires_score: bool = False
@@ -89,23 +91,56 @@ _METRIC_SPECS: dict[MetricName, MetricSpec] = {
 }
 
 
-def metric_spec(name: MetricName) -> MetricSpec:
-    return _METRIC_SPECS[name]
+def metric_spec(name: MetricIdentifier, manifests: tuple[ProviderManifest, ...] = ()) -> MetricSpec:
+    if isinstance(name, MetricName):
+        return _METRIC_SPECS[name]
+    for manifest in manifests:
+        for declaration in manifest.metrics:
+            if declaration.id == name:
+                return MetricSpec(
+                    name,
+                    frozenset(TaskType(task) for task in declaration.tasks),
+                    declaration.direction,
+                    declaration.requires_score,
+                    declaration.display_name,
+                )
+    raise ValueError(f"unresolved external metric '{name}'; explicitly activate its provider")
 
 
 def compute_metrics(
-    requested: Sequence[MetricName],
+    requested: Sequence[MetricIdentifier],
     truth: NDArray[np.int64] | NDArray[np.float64],
     prediction: NDArray[np.int64] | NDArray[np.float64],
     score: NDArray[np.float64] | None,
     task: TaskType | None = None,
+    *,
+    manifests: tuple[ProviderManifest, ...] = (),
+    functions: Mapping[
+        str, Callable[[NDArray[Any], NDArray[Any], NDArray[np.float64] | None], float]
+    ]
+    | None = None,
 ) -> dict[str, float]:
     values: dict[str, float] = {}
     for metric in requested:
-        spec = metric_spec(metric)
+        spec = metric_spec(metric, manifests)
         if task is not None and not spec.supports_task(task):
             raise ValueError(f"metric '{metric}' is incompatible with task '{task}'")
-        if metric == MetricName.ACCURACY:
+        if spec.requires_score and score is None:
+            raise ValueError(f"metric '{metric}' requires predict_proba or decision_function")
+        if not isinstance(metric, MetricName):
+            if functions is None or metric not in functions:
+                raise ValueError(f"metric '{metric}' has no activated implementation")
+            # Private copies keep callbacks from mutating predictions or other metrics.
+            value = functions[metric](
+                truth.copy(), prediction.copy(), None if score is None else score.copy()
+            )
+            if (
+                isinstance(value, (bool, np.bool_))
+                or not isinstance(value, Real)
+                or not np.isfinite(float(value))
+            ):
+                raise ValueError(f"metric '{metric}' must return a finite scalar")
+        elif metric == MetricName.ACCURACY:
             value = accuracy_score(truth, prediction)
         elif metric == MetricName.BALANCED_ACCURACY:
             value = balanced_accuracy_score(truth, prediction)

@@ -38,6 +38,7 @@ class RobustnessArtifactStore:
             directory / "metadata.json",
             {
                 "artifact_schema_version": 1,
+                **config.provider_metadata(),
                 "created_at": (created_at or datetime.now(UTC)).isoformat(),
                 "versions": dependency_versions(),
                 "robustness_fingerprint": result.fingerprint,
