@@ -90,6 +90,13 @@ class ExperimentConfig(StrictModel):
             raise ValueError("duplicate provider manifest")
         if manifests and manifests != refs:
             raise ValueError("provider manifests disagree with selected provider versions")
+        for metric in getattr(self, "metrics", ()):
+            if isinstance(metric, ExternalMetric) and not any(
+                metric.startswith(provider.id + ".") for provider in self.providers
+            ):
+                raise ValueError(
+                    f"external metric '{metric}' requires an explicit provider selection"
+                )
         return self
 
     def provider_semantics(self, data: dict[str, Any]) -> dict[str, Any]:

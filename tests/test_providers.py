@@ -760,3 +760,10 @@ def test_activation_snapshots_revalidated_immutable_manifest(monkeypatch, instal
     mutable.clear()
     assert len(bound.provider_manifests[0].datasets) == 1
     assert isinstance(bound.provider_manifests[0].datasets, tuple)
+
+
+def test_external_metric_requires_provider_selection_even_without_persisted_declarations(config):
+    raw = config.model_dump()
+    raw["providers"] = ()
+    with pytest.raises(ValidationError, match="requires an explicit provider selection"):
+        type(config).model_validate(raw)
