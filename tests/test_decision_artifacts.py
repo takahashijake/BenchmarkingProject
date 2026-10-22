@@ -625,6 +625,8 @@ def test_html_target_label_injection_is_text_and_escaped(tmp_path):
     content = render_report(load_report(result.artifact_directory, deep=True))
     check_html(content)
     assert "&lt;script&gt;" in content and "<script>" not in content
+    assert "Calibration is disabled" in content
+    assert "Calibration cross-fits" not in content
 
 
 def test_new_contract_schema_files_match_public_types():

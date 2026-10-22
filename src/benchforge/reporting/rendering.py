@@ -367,8 +367,11 @@ def _decision(r: ExperimentReport) -> str:
     body += "The following comparisons use matched untouched outer probabilities.</p>"
     body += "<p>Positive decisions use P(encoded class 1) &gt;= threshold. "
     body += "FP means class 0 predicted as 1; FN means class 1 predicted as 0. "
-    body += "Calibration cross-fits the full preprocessing/model pipeline within training "
-    body += "boundaries, with ensemble=False, then refits the base model on that boundary.</p>"
+    if evidence["calibration"]["method"] == "none":
+        body += "Calibration is disabled; probabilities come directly from predict_proba.</p>"
+    else:
+        body += "Calibration cross-fits the full preprocessing/model pipeline within training "
+        body += "boundaries, with ensemble=False, then refits the base model on that boundary.</p>"
     rows = []
     for candidate in evidence["candidates"]:
         for fold in candidate["folds"]:
