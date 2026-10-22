@@ -33,6 +33,7 @@ from benchforge.search.results import (
     FinalCandidate,
     OuterFoldSearchResult,
     SearchResult,
+    SearchTaskDiagnostic,
     TrialRecord,
     TunedLeaderboardEntry,
 )
@@ -57,6 +58,15 @@ class FamilySearchError(RuntimeError):
         super().__init__(message)
         self.trials = trials
         self.configured_trials = configured_trials
+
+
+class OuterRefitError(FoldExecutionError):
+    """Retain the completed study when its selected configuration cannot refit."""
+
+    def __init__(self, message: str, trials: tuple[TrialRecord, ...], configured: int) -> None:
+        super().__init__(message)
+        self.trials = trials
+        self.configured_trials = configured
 
 
 def _parameters(
@@ -183,97 +193,80 @@ def _counts(records: tuple[TrialRecord, ...]) -> tuple[int, int, int]:
     )
 
 
-def _search_family(
+def _search_outer(
     config: SearchConfig,
     candidate: SearchModelConfig,
     dataset: Dataset,
-    outer_folds: tuple[Fold, ...],
-    inner_folds: dict[int, tuple[Fold, ...]],
+    outer_fold: Fold,
+    inner_folds: tuple[Fold, ...],
     *,
     model_registry: ModelRegistry,
     search_space_registry: SearchSpaceRegistry,
-    workspace: SearchWorkspace | None = None,
-) -> FamilySearchResult:
-    started = perf_counter()
+) -> OuterFoldSearchResult:
+    """The single scientific task kernel, shared by direct and isolated execution."""
     identifier = candidate.id or candidate.name
     space = search_space_registry.resolve(candidate.name) if candidate.mode == "search" else None
     if candidate.mode == "fixed":
         _validate_model_parameters(
             candidate, dict(candidate.parameters), config.seed, model_registry, config.task
         )
-    fold_results: list[OuterFoldSearchResult] = []
+    fold_started = perf_counter()
+    estimator_seed = derive_seed(config.seed, "estimator", identifier, outer_fold.fold_id)
+    if space is not None:
+        sampler_seed = derive_seed(config.seed, "sampler", identifier, outer_fold.fold_id)
+        selected, inner_score, trials = _run_study(
+            config,
+            candidate,
+            dataset,
+            inner_folds,
+            trials=config.budget.trials_per_outer_fold,
+            timeout=config.budget.timeout_seconds_per_outer_fold,
+            sampler_seed=sampler_seed,
+            estimator_seed=estimator_seed,
+            space=space,
+            model_registry=model_registry,
+        )
+        configured_trials = config.budget.trials_per_outer_fold
+    else:
+        sampler_seed = None
+        selected = dict(candidate.parameters)
+        inner_score = None
+        trials = ()
+        configured_trials = 0
 
-    for outer_fold in outer_folds:
-        recovered = workspace.load_outer(candidate, outer_fold) if workspace else None
-        if recovered is not None:
-            fold_results.append(recovered)
-            continue
-        fold_started = perf_counter()
-        estimator_seed = derive_seed(config.seed, "estimator", identifier, outer_fold.fold_id)
-        if space is not None:
-            sampler_seed = derive_seed(config.seed, "sampler", identifier, outer_fold.fold_id)
-            try:
-                selected, inner_score, trials = _run_study(
-                    config,
-                    candidate,
-                    dataset,
-                    inner_folds[outer_fold.fold_id],
-                    trials=config.budget.trials_per_outer_fold,
-                    timeout=config.budget.timeout_seconds_per_outer_fold,
-                    sampler_seed=sampler_seed,
-                    estimator_seed=estimator_seed,
-                    space=space,
-                    model_registry=model_registry,
-                )
-            except FamilySearchError as exc:
-                previous_trials = tuple(
-                    trial for completed_fold in fold_results for trial in completed_fold.trials
-                )
-                raise FamilySearchError(
-                    str(exc),
-                    trials=(*previous_trials, *exc.trials),
-                    configured_trials=(
-                        sum(fold.configured_trials for fold in fold_results) + exc.configured_trials
-                    ),
-                ) from exc
-            configured_trials = config.budget.trials_per_outer_fold
-        else:
-            sampler_seed = None
-            selected = dict(candidate.parameters)
-            inner_score = None
-            trials = ()
-            configured_trials = 0
-
-        model = ModelConfig(name=candidate.name, id=candidate.id, parameters=selected)
-        run_config = config.to_run_config(model, split=config.outer_split, seed=estimator_seed)
+    model = ModelConfig(name=candidate.name, id=candidate.id, parameters=selected)
+    run_config = config.to_run_config(model, split=config.outer_split, seed=estimator_seed)
+    try:
         outer_result, predictions = execute_fold(
             run_config, dataset, outer_fold, model_registry=model_registry
         )
-        completed, failed, pruned = _counts(trials)
-        fold_results.append(
-            OuterFoldSearchResult(
-                fold_id=outer_fold.fold_id,
-                outer_train_indices=tuple(int(index) for index in outer_fold.train_indices),
-                outer_validation_indices=tuple(
-                    int(index) for index in outer_fold.validation_indices
-                ),
-                inner_folds=inner_folds[outer_fold.fold_id] if space is not None else (),
-                selected_parameters=selected,
-                best_inner_score=inner_score,
-                trials=trials,
-                outer_result=outer_result,
-                outer_predictions=predictions,
-                duration_seconds=perf_counter() - fold_started,
-                configured_trials=configured_trials,
-                completed_trials=completed,
-                failed_trials=failed,
-                pruned_trials=pruned,
-                sampler_seed=sampler_seed,
-            )
-        )
-        if workspace is not None:
-            workspace.save_outer(candidate, outer_fold, fold_results[-1])
+    except FoldExecutionError as exc:
+        raise OuterRefitError(str(exc), trials, configured_trials) from exc
+    completed, failed, pruned = _counts(trials)
+    return OuterFoldSearchResult(
+        fold_id=outer_fold.fold_id,
+        outer_train_indices=tuple(int(index) for index in outer_fold.train_indices),
+        outer_validation_indices=tuple(int(index) for index in outer_fold.validation_indices),
+        inner_folds=inner_folds if space is not None else (),
+        selected_parameters=selected,
+        best_inner_score=inner_score,
+        trials=trials,
+        outer_result=outer_result,
+        outer_predictions=predictions,
+        duration_seconds=perf_counter() - fold_started,
+        configured_trials=configured_trials,
+        completed_trials=completed,
+        failed_trials=failed,
+        pruned_trials=pruned,
+        sampler_seed=sampler_seed,
+    )
 
+
+def _aggregate_family(
+    candidate: SearchModelConfig,
+    fold_results: list[OuterFoldSearchResult],
+    duration: float,
+) -> FamilySearchResult:
     all_predictions = tuple(
         sorted(
             (prediction for fold in fold_results for prediction in fold.outer_predictions),
@@ -285,19 +278,78 @@ def _search_family(
     failed = sum(fold.failed_trials for fold in fold_results)
     pruned = sum(fold.pruned_trials for fold in fold_results)
     return FamilySearchResult(
-        model_identifier=identifier,
+        model_identifier=candidate.id or candidate.name,
         candidate=candidate,
         outer_folds=tuple(fold_results),
         aggregate_metrics=aggregate_fold_metrics(
             fold.outer_result.metrics for fold in fold_results
         ),
         predictions=all_predictions,
-        duration_seconds=perf_counter() - started,
+        duration_seconds=duration,
         configured_trials=configured,
         completed_trials=completed,
         failed_trials=failed,
         pruned_trials=pruned,
     )
+
+
+def _search_family(
+    config: SearchConfig,
+    candidate: SearchModelConfig,
+    dataset: Dataset,
+    outer_folds: tuple[Fold, ...],
+    inner_folds: dict[int, tuple[Fold, ...]],
+    *,
+    model_registry: ModelRegistry,
+    search_space_registry: SearchSpaceRegistry,
+    workspace: SearchWorkspace | None = None,
+    diagnostics: list[SearchTaskDiagnostic] | None = None,
+) -> FamilySearchResult:
+    started = perf_counter()
+    fold_results: list[OuterFoldSearchResult] = []
+    for outer_fold in outer_folds:
+        key = SearchWorkspace.outer_key(candidate, outer_fold)
+        recovered = workspace.load_outer(candidate, outer_fold) if workspace else None
+        if recovered is not None:
+            fold_results.append(recovered)
+            if diagnostics is not None:
+                diagnostics.append(SearchTaskDiagnostic(key, "reused"))
+            continue
+        try:
+            result = _search_outer(
+                config,
+                candidate,
+                dataset,
+                outer_fold,
+                inner_folds[outer_fold.fold_id],
+                model_registry=model_registry,
+                search_space_registry=search_space_registry,
+            )
+        except (ValueError, FoldExecutionError, FamilySearchError) as exc:
+            if diagnostics is not None:
+                diagnostics.append(SearchTaskDiagnostic(key, "failed"))
+            if isinstance(exc, (FamilySearchError, OuterRefitError)):
+                previous_trials = tuple(t for fold in fold_results for t in fold.trials)
+                if isinstance(exc, OuterRefitError):
+                    raise OuterRefitError(
+                        str(exc),
+                        (*previous_trials, *exc.trials),
+                        sum(f.configured_trials for f in fold_results) + exc.configured_trials,
+                    ) from exc
+                raise FamilySearchError(
+                    str(exc),
+                    trials=(*previous_trials, *exc.trials),
+                    configured_trials=(
+                        sum(f.configured_trials for f in fold_results) + exc.configured_trials
+                    ),
+                ) from exc
+            raise
+        if workspace is not None:
+            workspace.save_outer(candidate, outer_fold, result)
+        fold_results.append(result)
+        if diagnostics is not None:
+            diagnostics.append(SearchTaskDiagnostic(key, "success"))
+    return _aggregate_family(candidate, fold_results, perf_counter() - started)
 
 
 def _leaderboard(
@@ -429,10 +481,33 @@ def _run_search(
     dataset: Dataset | None = None,
     checkpoint_dir: Path | None = None,
     resume: bool = False,
+    workers: int = 1,
     _orchestration: dict[str, Any] | None = None,
     _stack: ExitStack,
 ) -> SearchResult:
     """Tune families inside outer training partitions and rank outer-fold evidence only."""
+    from benchforge.search.parallel import validate_workers
+
+    validate_workers(workers)
+    if workers > 1:
+        if config.providers:
+            raise ValueError("external providers require serial search execution")
+        if (
+            model_registry is not default_model_registry
+            or search_space_registry is not default_search_space_registry
+            or dataset_registry is not default_dataset_registry
+        ):
+            raise ValueError("parallel search requires built-in registries")
+        if (
+            config.budget.timeout_seconds_per_outer_fold is not None
+            or config.final_search.timeout_seconds is not None
+        ):
+            raise ValueError("parallel search requires trial budgets without wall-clock timeouts")
+        for candidate in config.models:
+            jobs = candidate.parameters.get("n_jobs")
+            if jobs is not None and jobs != 1:
+                raise ValueError(f"model '{candidate.id or candidate.name}' requires n_jobs=1")
+
     from benchforge.providers.runtime import activate
 
     config, provider_runtime = activate(config)
@@ -502,42 +577,67 @@ def _run_search(
                 orchestration=_orchestration,
             )
         )
-    families: list[FamilySearchResult] = []
-    failures: list[FamilySearchFailure] = []
-    for candidate in config.models:
-        family_started = perf_counter()
-        try:
-            families.append(
-                _search_family(
-                    config,
-                    candidate,
-                    dataset,
-                    outer_folds,
-                    inner_folds,
-                    model_registry=model_registry,
-                    search_space_registry=search_space_registry,
-                    workspace=workspace,
+    diagnostics: list[SearchTaskDiagnostic] = []
+    families: list[FamilySearchResult]
+    failures: list[FamilySearchFailure]
+    if workers > 1:
+        from benchforge.search.parallel import search_parallel
+
+        families, failures = search_parallel(
+            config,
+            dataset,
+            outer_folds,
+            inner_folds,
+            workers=workers,
+            workspace=workspace,
+            diagnostics=diagnostics,
+        )
+    else:
+        families = []
+        failures = []
+        for candidate in config.models:
+            family_started = perf_counter()
+            try:
+                families.append(
+                    _search_family(
+                        config,
+                        candidate,
+                        dataset,
+                        outer_folds,
+                        inner_folds,
+                        model_registry=model_registry,
+                        search_space_registry=search_space_registry,
+                        workspace=workspace,
+                        diagnostics=diagnostics,
+                    )
                 )
-            )
-        except (ValueError, FoldExecutionError, FamilySearchError) as exc:
-            failure_trials = exc.trials if isinstance(exc, FamilySearchError) else ()
-            completed, failed, pruned = _counts(failure_trials)
-            failures.append(
-                FamilySearchFailure(
-                    model_identifier=candidate.id or candidate.name,
-                    model_name=candidate.name,
-                    error_type=type(exc).__name__,
-                    message=str(exc),
-                    duration_seconds=perf_counter() - family_started,
-                    configured_trials=(
-                        exc.configured_trials if isinstance(exc, FamilySearchError) else 0
-                    ),
-                    completed_trials=completed,
-                    failed_trials=failed,
-                    pruned_trials=pruned,
-                    trials=failure_trials,
+            except (ValueError, FoldExecutionError, FamilySearchError) as exc:
+                failure_trials = (
+                    exc.trials if isinstance(exc, (FamilySearchError, OuterRefitError)) else ()
                 )
-            )
+                completed, failed, pruned = _counts(failure_trials)
+                failures.append(
+                    FamilySearchFailure(
+                        model_identifier=candidate.id or candidate.name,
+                        model_name=candidate.name,
+                        error_type=(
+                            "FoldExecutionError"
+                            if isinstance(exc, OuterRefitError)
+                            else type(exc).__name__
+                        ),
+                        message=str(exc),
+                        duration_seconds=perf_counter() - family_started,
+                        configured_trials=(
+                            exc.configured_trials
+                            if isinstance(exc, (FamilySearchError, OuterRefitError))
+                            else 0
+                        ),
+                        completed_trials=completed,
+                        failed_trials=failed,
+                        pruned_trials=pruned,
+                        trials=failure_trials,
+                    )
+                )
     leaderboard = _leaderboard(families, failures, config)
     successful = [entry for entry in leaderboard if entry.status == "success"]
     if not successful:
@@ -550,6 +650,7 @@ def _run_search(
     final_candidate = None
     if config.final_search.enabled:
         final_candidate = workspace.load_final(top_family.candidate) if workspace else None
+        final_reused = final_candidate is not None
         if final_candidate is None:
             final_candidate = _final_search(
                 config,
@@ -560,6 +661,12 @@ def _run_search(
             )
             if workspace is not None:
                 workspace.save_final(top_family.candidate, final_candidate)
+        diagnostics.append(
+            SearchTaskDiagnostic(
+                SearchWorkspace.final_key(top_family.candidate),
+                "reused" if final_reused else "success",
+            )
+        )
     result = SearchResult(
         provider_manifests=config.provider_manifests,
         fingerprint=fingerprint,
@@ -578,6 +685,11 @@ def _run_search(
         checkpoint_reused=tuple(workspace.reused) if workspace else (),
         checkpoint_executed=tuple(workspace.executed) if workspace else (),
         checkpoint_invalid=tuple(workspace.invalid) if workspace else (),
+        execution_mode="subprocess" if workers > 1 else "serial",
+        execution_workers=workers,
+        execution_planned_tasks=len(config.models) * len(outer_folds)
+        + int(config.final_search.enabled),
+        execution_diagnostics=tuple(diagnostics),
     )
     if persist:
         from benchforge.storage.search import SearchArtifactStore
@@ -597,11 +709,14 @@ def run_search(
     dataset: Dataset | None = None,
     checkpoint_dir: Path | None = None,
     resume: bool = False,
+    workers: int = 1,
 ) -> SearchResult:
     """Run nested search; optionally create or resume a complete-fold workspace.
 
     An interrupted study is recomputed. Recovery rejects wall-clock study limits
     and unversioned custom registries. The workspace lock spans artifact sealing.
+    ``workers=1`` executes directly; larger counts isolate complete outer folds
+    in bounded subprocesses and require built-ins and trial-count budgets.
     """
     with ExitStack() as stack:
         return _run_search(
@@ -613,5 +728,6 @@ def run_search(
             dataset=dataset,
             checkpoint_dir=checkpoint_dir,
             resume=resume,
+            workers=workers,
             _stack=stack,
         )

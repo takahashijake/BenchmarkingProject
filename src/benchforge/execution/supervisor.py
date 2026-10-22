@@ -1,4 +1,4 @@
-"""Bounded POSIX subprocess scheduling; no fitting or scientific policy here."""
+"""Bounded subprocess scheduling; no fitting or scientific policy here."""
 
 from __future__ import annotations
 
@@ -56,9 +56,12 @@ class _Active:
 
 
 def _cleanup(worker: _Active) -> None:
-    """Kill the entire group, including descendants left by an exited leader."""
-    with suppress(ProcessLookupError):
-        os.killpg(worker.process.pid, signal.SIGKILL)
+    """Reap the direct worker; POSIX also kills descendants in its session group."""
+    if os.name == "posix":
+        with suppress(ProcessLookupError):
+            os.killpg(worker.process.pid, signal.SIGKILL)
+    elif worker.process.poll() is None:
+        worker.process.kill()
     try:
         worker.process.wait(timeout=2)
     except subprocess.TimeoutExpired as exc:
@@ -81,9 +84,9 @@ def supervise[T, R](
     Startup, imports and result serialization count toward candidate wall time.
     Closing this iterator also terminates all outstanding workers.
     """
-    if os.name != "posix":
-        raise ValueError("subprocess supervision requires POSIX process groups")
-    if workers < 1:
+    if os.name != "posix" and (options.bounded or deadline is not None):
+        raise ValueError("hard execution budgets require POSIX process groups")
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ValueError("workers must be at least 1")
     active: dict[int, _Active] = {}
     next_index = 0
@@ -116,13 +119,15 @@ def supervise[T, R](
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
-                        start_new_session=True,
+                        start_new_session=os.name == "posix",
                         env={
                             **os.environ,
                             "OMP_NUM_THREADS": "1",
                             "OPENBLAS_NUM_THREADS": "1",
                             "MKL_NUM_THREADS": "1",
                             "BLIS_NUM_THREADS": "1",
+                            "VECLIB_MAXIMUM_THREADS": "1",
+                            "NUMEXPR_NUM_THREADS": "1",
                         },
                     )
                     active[index] = _Active(process, started, output)

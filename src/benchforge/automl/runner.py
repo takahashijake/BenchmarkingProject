@@ -23,9 +23,23 @@ def _run_automl(
     persist: bool = True,
     checkpoint_dir: Path | None = None,
     resume: bool = False,
+    workers: int = 1,
     _stack: ExitStack,
 ) -> AutoMLResult:
     """Plan AutoML deterministically, then delegate all evaluation to ``run_search``."""
+    from benchforge.search.parallel import validate_workers
+
+    validate_workers(workers)
+    if workers > 1:
+        if config.providers:
+            raise ValueError("external providers require serial AutoML execution")
+        if (
+            model_registry is not default_model_registry
+            or search_space_registry is not default_search_space_registry
+            or dataset_registry is not default_dataset_registry
+        ):
+            raise ValueError("parallel AutoML requires built-in registries")
+
     from benchforge.providers.runtime import activate
 
     config, provider_runtime = activate(config)
@@ -59,6 +73,7 @@ def _run_automl(
         _stack=_stack,
         checkpoint_dir=checkpoint_dir,
         resume=resume,
+        workers=workers,
         _orchestration={
             "automl_plan": plan.canonical_dict(),
             "selected_models": plan.selected_model_identity,
@@ -93,8 +108,13 @@ def run_automl(
     persist: bool = True,
     checkpoint_dir: Path | None = None,
     resume: bool = False,
+    workers: int = 1,
 ) -> AutoMLResult:
-    """Plan deterministically and recover through ordinary search, including parent sealing."""
+    """Plan deterministically and delegate to bounded search, including parent sealing.
+
+    ``workers`` is execution policy; it does not change the AutoML plan or identity.
+    Pinned providers retain their direct serial execution contract.
+    """
     with ExitStack() as stack:
         return _run_automl(
             config,
@@ -104,5 +124,6 @@ def run_automl(
             persist=persist,
             checkpoint_dir=checkpoint_dir,
             resume=resume,
+            workers=workers,
             _stack=stack,
         )

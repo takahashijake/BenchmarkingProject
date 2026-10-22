@@ -67,7 +67,169 @@ _OUTER = TypeAdapter(StoredOuterFold)
 _FINAL = TypeAdapter(FinalCandidate)
 
 
-class SearchWorkspace:
+class SearchEvidenceValidator:
+    """Shared scientific validation, independent of workspace I/O or locking."""
+
+    def __init__(
+        self,
+        config: SearchConfig,
+        dataset: Dataset,
+        inner: dict[int, tuple[Fold, ...]],
+        spaces: SearchSpaceRegistry,
+    ) -> None:
+        self.config, self.dataset, self.inner, self.spaces = config, dataset, inner, spaces
+
+    def _trials(
+        self,
+        candidate: SearchModelConfig,
+        records: tuple[TrialRecord, ...],
+        configured: int,
+        completed: int,
+        failed: int,
+        pruned: int,
+        selected: dict[str, JsonScalar],
+        score: float | None,
+        budget: int,
+    ) -> None:
+        expected_budget = budget if candidate.mode == "search" else 0
+        if (
+            configured != expected_budget
+            or len(records) != configured
+            or [r.number for r in records] != list(range(configured))
+            or (completed, failed, pruned)
+            != tuple(
+                sum(r.state == state for r in records) for state in ("COMPLETE", "FAIL", "PRUNED")
+            )
+        ):
+            raise ValueError("invalid trial counts or sequence")
+        if candidate.mode == "fixed":
+            if _sha(selected) != _sha(candidate.parameters):
+                raise ValueError("fixed parameters changed")
+            return
+        space = self.spaces.resolve(candidate.name)
+        for r in records:
+            if r.state not in {"COMPLETE", "FAIL"} or r.duration_seconds < 0:
+                raise ValueError("invalid trial state or duration")
+            if set(r.proposed_parameters) & set(candidate.parameters):
+                raise ValueError("trial overwrites fixed parameters")
+            if _sha(r.parameters) != _sha(
+                {**space.defaults, **candidate.parameters, **r.proposed_parameters}
+            ):
+                raise ValueError("trial parameters disagree with model configuration")
+            if (r.state == "COMPLETE") != (r.value is not None):
+                raise ValueError("invalid trial objective")
+        successes = [r for r in records if r.state == "COMPLETE"]
+        if not successes:
+            raise ValueError("checkpoint has no successful trial")
+        direction = self.config.metric_spec(self.config.primary_metric).direction
+        best = sorted(
+            successes,
+            key=lambda r: (
+                -float(r.value if r.value is not None else 0)
+                if direction == "maximize"
+                else float(r.value if r.value is not None else 0),
+                r.number,
+            ),
+        )[0]
+        if _sha(selected) != _sha(best.parameters) or score != best.value:
+            raise ValueError("selection disagrees with trial evidence")
+
+    def _validate_outer(
+        self, candidate: SearchModelConfig, fold: Fold, value: StoredOuterFold
+    ) -> OuterFoldSearchResult:
+        inner = self.inner[fold.fold_id] if candidate.mode == "search" else ()
+        seed = (
+            derive_seed(self.config.seed, "sampler", candidate.id or candidate.name, fold.fold_id)
+            if candidate.mode == "search"
+            else None
+        )
+        if (
+            value.fold_id != fold.fold_id
+            or value.outer_train_indices != tuple(fold.train_indices)
+            or value.outer_validation_indices != tuple(fold.validation_indices)
+            or _sha(value.inner_plan) != _sha(fold_plan(inner))
+            or value.estimator_seed
+            != derive_seed(
+                self.config.seed, "estimator", candidate.id or candidate.name, fold.fold_id
+            )
+            or value.sampler_seed != seed
+        ):
+            raise ValueError("checkpoint fold plan or seed mismatch")
+        self._trials(
+            candidate,
+            value.trials,
+            value.configured_trials,
+            value.completed_trials,
+            value.failed_trials,
+            value.pruned_trials,
+            value.selected_parameters,
+            value.best_inner_score,
+            self.config.budget.trials_per_outer_fold,
+        )
+        if candidate.mode == "fixed" and value.best_inner_score is not None:
+            raise ValueError("fixed outer task has inner selection evidence")
+        result, predictions = value.outer_result, value.outer_predictions
+        if (
+            result.fold_id != fold.fold_id
+            or result.train_size != len(fold.train_indices)
+            or result.validation_size != len(fold.validation_indices)
+            or len(predictions) != len(fold.validation_indices)
+            or [p.sample_index for p in predictions] != fold.validation_indices.tolist()
+            or any(p.fold_id != fold.fold_id for p in predictions)
+        ):
+            raise ValueError("invalid prediction indices or fold membership")
+        truth = self.dataset.target.iloc[fold.validation_indices].to_numpy()
+        if not np.array_equal(truth, [p.truth for p in predictions]):
+            raise ValueError("prediction truth disagrees with dataset")
+        predicted = np.asarray([p.prediction for p in predictions])
+        if not np.isfinite(predicted).all():
+            raise ValueError("nonfinite predictions")
+        if self.config.task.is_classification and not set(predicted) <= set(self.dataset.target):
+            raise ValueError("invalid predicted class")
+        needs_score = any(self.config.metric_spec(m).requires_score for m in self.config.metrics)
+        if any((p.score is not None) != needs_score for p in predictions):
+            raise ValueError("invalid prediction score availability")
+        scores = np.asarray([p.score for p in predictions], dtype=float) if needs_score else None
+        if scores is not None and not np.isfinite(scores).all():
+            raise ValueError("nonfinite prediction score")
+        metrics = compute_metrics(
+            self.config.metrics,
+            truth,
+            predicted,
+            scores,
+            self.config.task,
+            manifests=self.config.provider_manifests,
+            functions=(
+                self.config._provider_runtime.metrics if self.config._provider_runtime else None
+            ),
+        )
+        if set(result.metrics) != set(metrics) or any(
+            not np.isclose(result.metrics[k], v, rtol=1e-12, atol=1e-12) for k, v in metrics.items()
+        ):
+            raise ValueError("checkpoint metrics disagree with predictions")
+        if value.duration_seconds < 0:
+            raise ValueError("invalid duration")
+        values = {
+            name: getattr(value, name)
+            for name in type(value).model_fields
+            if name not in {"inner_plan", "estimator_seed"}
+        }
+        return OuterFoldSearchResult(**values, inner_folds=inner)
+
+    def outer_payload(
+        self, candidate: SearchModelConfig, fold: Fold, value: OuterFoldSearchResult
+    ) -> StoredOuterFold:
+        payload = {f.name: getattr(value, f.name) for f in fields(value) if f.name != "inner_folds"}
+        payload["inner_plan"] = fold_plan(value.inner_folds)
+        payload["estimator_seed"] = derive_seed(
+            self.config.seed, "estimator", candidate.id or candidate.name, fold.fold_id
+        )
+        wire = _OUTER.validate_python(payload)
+        self._validate_outer(candidate, fold, wire)
+        return wire
+
+
+class SearchWorkspace(SearchEvidenceValidator):
     """Exclusive coordinator-owned JSON workspace, independent of published artifacts."""
 
     def __init__(
@@ -84,8 +246,8 @@ class SearchWorkspace:
         orchestration: dict[str, Any] | None = None,
     ) -> None:
         self.path = path.absolute()
-        self.config, self.dataset, self.outer, self.inner = config, dataset, outer, inner
-        self.spaces = spaces
+        super().__init__(config, dataset, inner, spaces)
+        self.outer = outer
         self.resume = resume
         self.reused: list[str] = []
         self.executed: list[str] = []
@@ -251,143 +413,6 @@ class SearchWorkspace:
         )
         self.executed.append(key)
 
-    def _trials(
-        self,
-        candidate: SearchModelConfig,
-        records: tuple[TrialRecord, ...],
-        configured: int,
-        completed: int,
-        failed: int,
-        pruned: int,
-        selected: dict[str, JsonScalar],
-        score: float | None,
-        budget: int,
-    ) -> None:
-        expected_budget = budget if candidate.mode == "search" else 0
-        if (
-            configured != expected_budget
-            or len(records) != configured
-            or [r.number for r in records] != list(range(configured))
-            or (completed, failed, pruned)
-            != tuple(
-                sum(r.state == state for r in records) for state in ("COMPLETE", "FAIL", "PRUNED")
-            )
-        ):
-            raise ValueError("invalid trial counts or sequence")
-        if candidate.mode == "fixed":
-            if _sha(selected) != _sha(candidate.parameters):
-                raise ValueError("fixed parameters changed")
-            return
-        space = self.spaces.resolve(candidate.name)
-        for r in records:
-            if r.state not in {"COMPLETE", "FAIL"} or r.duration_seconds < 0:
-                raise ValueError("invalid trial state or duration")
-            if set(r.proposed_parameters) & set(candidate.parameters):
-                raise ValueError("trial overwrites fixed parameters")
-            if _sha(r.parameters) != _sha(
-                {**space.defaults, **candidate.parameters, **r.proposed_parameters}
-            ):
-                raise ValueError("trial parameters disagree with model configuration")
-            if (r.state == "COMPLETE") != (r.value is not None):
-                raise ValueError("invalid trial objective")
-        successes = [r for r in records if r.state == "COMPLETE"]
-        if not successes:
-            raise ValueError("checkpoint has no successful trial")
-        direction = self.config.metric_spec(self.config.primary_metric).direction
-        best = sorted(
-            successes,
-            key=lambda r: (
-                -float(r.value if r.value is not None else 0)
-                if direction == "maximize"
-                else float(r.value if r.value is not None else 0),
-                r.number,
-            ),
-        )[0]
-        if _sha(selected) != _sha(best.parameters) or score != best.value:
-            raise ValueError("selection disagrees with trial evidence")
-
-    def _validate_outer(
-        self, candidate: SearchModelConfig, fold: Fold, value: StoredOuterFold
-    ) -> OuterFoldSearchResult:
-        inner = self.inner[fold.fold_id] if candidate.mode == "search" else ()
-        seed = (
-            derive_seed(self.config.seed, "sampler", candidate.id or candidate.name, fold.fold_id)
-            if candidate.mode == "search"
-            else None
-        )
-        if (
-            value.fold_id != fold.fold_id
-            or value.outer_train_indices != tuple(fold.train_indices)
-            or value.outer_validation_indices != tuple(fold.validation_indices)
-            or _sha(value.inner_plan) != _sha(fold_plan(inner))
-            or value.estimator_seed
-            != derive_seed(
-                self.config.seed, "estimator", candidate.id or candidate.name, fold.fold_id
-            )
-            or value.sampler_seed != seed
-        ):
-            raise ValueError("checkpoint fold plan or seed mismatch")
-        self._trials(
-            candidate,
-            value.trials,
-            value.configured_trials,
-            value.completed_trials,
-            value.failed_trials,
-            value.pruned_trials,
-            value.selected_parameters,
-            value.best_inner_score,
-            self.config.budget.trials_per_outer_fold,
-        )
-        if candidate.mode == "fixed" and value.best_inner_score is not None:
-            raise ValueError("fixed outer task has inner selection evidence")
-        result, predictions = value.outer_result, value.outer_predictions
-        if (
-            result.fold_id != fold.fold_id
-            or result.train_size != len(fold.train_indices)
-            or result.validation_size != len(fold.validation_indices)
-            or len(predictions) != len(fold.validation_indices)
-            or [p.sample_index for p in predictions] != fold.validation_indices.tolist()
-            or any(p.fold_id != fold.fold_id for p in predictions)
-        ):
-            raise ValueError("invalid prediction indices or fold membership")
-        truth = self.dataset.target.iloc[fold.validation_indices].to_numpy()
-        if not np.array_equal(truth, [p.truth for p in predictions]):
-            raise ValueError("prediction truth disagrees with dataset")
-        predicted = np.asarray([p.prediction for p in predictions])
-        if not np.isfinite(predicted).all():
-            raise ValueError("nonfinite predictions")
-        if self.config.task.is_classification and not set(predicted) <= set(self.dataset.target):
-            raise ValueError("invalid predicted class")
-        needs_score = any(self.config.metric_spec(m).requires_score for m in self.config.metrics)
-        if any((p.score is not None) != needs_score for p in predictions):
-            raise ValueError("invalid prediction score availability")
-        scores = np.asarray([p.score for p in predictions], dtype=float) if needs_score else None
-        if scores is not None and not np.isfinite(scores).all():
-            raise ValueError("nonfinite prediction score")
-        metrics = compute_metrics(
-            self.config.metrics,
-            truth,
-            predicted,
-            scores,
-            self.config.task,
-            manifests=self.config.provider_manifests,
-            functions=(
-                self.config._provider_runtime.metrics if self.config._provider_runtime else None
-            ),
-        )
-        if set(result.metrics) != set(metrics) or any(
-            not np.isclose(result.metrics[k], v, rtol=1e-12, atol=1e-12) for k, v in metrics.items()
-        ):
-            raise ValueError("checkpoint metrics disagree with predictions")
-        if value.duration_seconds < 0:
-            raise ValueError("invalid duration")
-        values = {
-            name: getattr(value, name)
-            for name in type(value).model_fields
-            if name not in {"inner_plan", "estimator_seed"}
-        }
-        return OuterFoldSearchResult(**values, inner_folds=inner)
-
     def load_outer(self, candidate: SearchModelConfig, fold: Fold) -> OuterFoldSearchResult | None:
         key = self.outer_key(candidate, fold)
         try:
@@ -407,15 +432,9 @@ class SearchWorkspace:
     def save_outer(
         self, candidate: SearchModelConfig, fold: Fold, value: OuterFoldSearchResult
     ) -> None:
-        payload = {f.name: getattr(value, f.name) for f in fields(value) if f.name != "inner_folds"}
-        payload["inner_plan"] = fold_plan(value.inner_folds)
-        payload["estimator_seed"] = derive_seed(
-            self.config.seed, "estimator", candidate.id or candidate.name, fold.fold_id
-        )
         # The same validation is mandatory at publication and reuse.
         try:
-            wire = _OUTER.validate_python(payload)
-            self._validate_outer(candidate, fold, wire)
+            wire = self.outer_payload(candidate, fold, value)
             self._save(self.outer_key(candidate, fold), _OUTER.dump_python(wire, mode="json"))
         except (ValueError, TypeError) as exc:
             raise CheckpointPublicationError("outer-fold checkpoint publication failed") from exc
