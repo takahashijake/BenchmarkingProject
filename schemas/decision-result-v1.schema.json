@@ -1,0 +1,819 @@
+{
+  "$defs": {
+    "Aggregate": {
+      "additionalProperties": false,
+      "properties": {
+        "mean": {
+          "title": "Mean",
+          "type": "number"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "std": {
+          "minimum": 0,
+          "title": "Std",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "mean",
+        "std"
+      ],
+      "title": "Aggregate",
+      "type": "object"
+    },
+    "CandidateResult": {
+      "additionalProperties": false,
+      "properties": {
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "folds": {
+          "items": {
+            "$ref": "#/$defs/OuterEvaluation"
+          },
+          "title": "Folds",
+          "type": "array"
+        },
+        "identifier": {
+          "title": "Identifier",
+          "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/$defs/Aggregate"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "parameters_json": {
+          "title": "Parameters Json",
+          "type": "string"
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rank"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "partial",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identifier",
+        "model_name",
+        "parameters_json",
+        "status",
+        "folds",
+        "failure",
+        "metrics"
+      ],
+      "title": "CandidateResult",
+      "type": "object"
+    },
+    "Confusion": {
+      "additionalProperties": false,
+      "properties": {
+        "fn": {
+          "minimum": 0,
+          "title": "Fn",
+          "type": "integer"
+        },
+        "fp": {
+          "minimum": 0,
+          "title": "Fp",
+          "type": "integer"
+        },
+        "tn": {
+          "minimum": 0,
+          "title": "Tn",
+          "type": "integer"
+        },
+        "tp": {
+          "minimum": 0,
+          "title": "Tp",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tn",
+        "fp",
+        "fn",
+        "tp"
+      ],
+      "title": "Confusion",
+      "type": "object"
+    },
+    "DatasetEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "categorical_features": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Categorical Features",
+          "type": "array"
+        },
+        "content_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "feature_count": {
+          "exclusiveMinimum": 0,
+          "title": "Feature Count",
+          "type": "integer"
+        },
+        "identity": {
+          "title": "Identity",
+          "type": "string"
+        },
+        "numeric_features": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Numeric Features",
+          "type": "array"
+        },
+        "row_count": {
+          "exclusiveMinimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "target_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Digest",
+          "type": "string"
+        },
+        "target_labels": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Target Labels",
+          "type": "array"
+        },
+        "target_name": {
+          "title": "Target Name",
+          "type": "string"
+        },
+        "truth": {
+          "items": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Truth",
+          "type": "array"
+        }
+      },
+      "required": [
+        "identity",
+        "content_digest",
+        "target_digest",
+        "row_count",
+        "feature_count",
+        "numeric_features",
+        "categorical_features",
+        "target_name",
+        "target_labels",
+        "truth"
+      ],
+      "title": "DatasetEvidence",
+      "type": "object"
+    },
+    "DecisionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "outer": {
+          "items": {
+            "$ref": "#/$defs/OuterPlan"
+          },
+          "title": "Outer",
+          "type": "array"
+        },
+        "outer_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Outer Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "outer_seed",
+        "outer"
+      ],
+      "title": "DecisionPlan",
+      "type": "object"
+    },
+    "DecisionPrediction": {
+      "additionalProperties": false,
+      "properties": {
+        "fold_id": {
+          "minimum": 0,
+          "title": "Fold Id",
+          "type": "integer"
+        },
+        "prediction": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Prediction",
+          "type": "integer"
+        },
+        "probability": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Probability",
+          "type": "number"
+        },
+        "reference_prediction": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Reference Prediction",
+          "type": "integer"
+        },
+        "sample_index": {
+          "minimum": 0,
+          "title": "Sample Index",
+          "type": "integer"
+        },
+        "truth": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Truth",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sample_index",
+        "fold_id",
+        "truth",
+        "probability",
+        "prediction",
+        "reference_prediction"
+      ],
+      "title": "DecisionPrediction",
+      "type": "object"
+    },
+    "Failure": {
+      "additionalProperties": false,
+      "properties": {
+        "error_type": {
+          "title": "Error Type",
+          "type": "string"
+        },
+        "fold_id": {
+          "minimum": 0,
+          "title": "Fold Id",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fold_id",
+        "error_type",
+        "message"
+      ],
+      "title": "Failure",
+      "type": "object"
+    },
+    "FitBoundary": {
+      "additionalProperties": false,
+      "properties": {
+        "calibration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SplitPlan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fold": {
+          "$ref": "#/$defs/Partition"
+        }
+      },
+      "required": [
+        "fold",
+        "calibration"
+      ],
+      "title": "FitBoundary",
+      "type": "object"
+    },
+    "InnerEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "estimator_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Estimator Seed",
+          "type": "integer"
+        },
+        "fold_id": {
+          "minimum": 0,
+          "title": "Fold Id",
+          "type": "integer"
+        },
+        "probabilities": {
+          "items": {
+            "$ref": "#/$defs/ProbabilityObservation"
+          },
+          "title": "Probabilities",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fold_id",
+        "estimator_seed",
+        "probabilities"
+      ],
+      "title": "InnerEvidence",
+      "type": "object"
+    },
+    "MetricValue": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "MetricValue",
+      "type": "object"
+    },
+    "OuterEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "estimator_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Estimator Seed",
+          "type": "integer"
+        },
+        "fold_id": {
+          "minimum": 0,
+          "title": "Fold Id",
+          "type": "integer"
+        },
+        "inner": {
+          "items": {
+            "$ref": "#/$defs/InnerEvidence"
+          },
+          "title": "Inner",
+          "type": "array"
+        },
+        "predictions": {
+          "items": {
+            "$ref": "#/$defs/DecisionPrediction"
+          },
+          "title": "Predictions",
+          "type": "array"
+        },
+        "probability_quality": {
+          "$ref": "#/$defs/ProbabilityQuality"
+        },
+        "reference": {
+          "$ref": "#/$defs/PolicyEvaluation"
+        },
+        "selected": {
+          "$ref": "#/$defs/PolicyEvaluation"
+        },
+        "selection": {
+          "$ref": "#/$defs/ThresholdSelection"
+        }
+      },
+      "required": [
+        "fold_id",
+        "estimator_seed",
+        "inner",
+        "selection",
+        "predictions",
+        "selected",
+        "reference",
+        "probability_quality"
+      ],
+      "title": "OuterEvaluation",
+      "type": "object"
+    },
+    "OuterPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "final": {
+          "$ref": "#/$defs/FitBoundary"
+        },
+        "inner": {
+          "items": {
+            "$ref": "#/$defs/FitBoundary"
+          },
+          "title": "Inner",
+          "type": "array"
+        },
+        "inner_seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Inner Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "final",
+        "inner_seed",
+        "inner"
+      ],
+      "title": "OuterPlan",
+      "type": "object"
+    },
+    "Partition": {
+      "additionalProperties": false,
+      "properties": {
+        "fold_id": {
+          "minimum": 0,
+          "title": "Fold Id",
+          "type": "integer"
+        },
+        "train_indices": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Train Indices",
+          "type": "array"
+        },
+        "validation_indices": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Validation Indices",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fold_id",
+        "train_indices",
+        "validation_indices"
+      ],
+      "title": "Partition",
+      "type": "object"
+    },
+    "PolicyEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "confusion": {
+          "$ref": "#/$defs/Confusion"
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/$defs/MetricValue"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "threshold": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "required": [
+        "threshold",
+        "confusion",
+        "metrics"
+      ],
+      "title": "PolicyEvaluation",
+      "type": "object"
+    },
+    "ProbabilityObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "fold_id": {
+          "minimum": 0,
+          "title": "Fold Id",
+          "type": "integer"
+        },
+        "probability": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Probability",
+          "type": "number"
+        },
+        "sample_index": {
+          "minimum": 0,
+          "title": "Sample Index",
+          "type": "integer"
+        },
+        "truth": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Truth",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sample_index",
+        "fold_id",
+        "truth",
+        "probability"
+      ],
+      "title": "ProbabilityObservation",
+      "type": "object"
+    },
+    "ProbabilityQuality": {
+      "additionalProperties": false,
+      "properties": {
+        "bins": {
+          "items": {
+            "$ref": "#/$defs/ReliabilityBin"
+          },
+          "title": "Bins",
+          "type": "array"
+        },
+        "brier_score": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Brier Score",
+          "type": "number"
+        },
+        "ece": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Ece",
+          "type": "number"
+        },
+        "log_loss": {
+          "minimum": 0,
+          "title": "Log Loss",
+          "type": "number"
+        },
+        "roc_auc": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Roc Auc"
+        }
+      },
+      "required": [
+        "brier_score",
+        "log_loss",
+        "roc_auc",
+        "ece",
+        "bins"
+      ],
+      "title": "ProbabilityQuality",
+      "type": "object"
+    },
+    "ReliabilityBin": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "lower": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Lower",
+          "type": "number"
+        },
+        "mean_probability": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mean Probability"
+        },
+        "positive_fraction": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Positive Fraction"
+        },
+        "upper": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Upper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper",
+        "count",
+        "mean_probability",
+        "positive_fraction"
+      ],
+      "title": "ReliabilityBin",
+      "type": "object"
+    },
+    "SplitPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "folds": {
+          "items": {
+            "$ref": "#/$defs/Partition"
+          },
+          "title": "Folds",
+          "type": "array"
+        },
+        "seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seed",
+        "folds"
+      ],
+      "title": "SplitPlan",
+      "type": "object"
+    },
+    "ThresholdSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "objective_value": {
+          "title": "Objective Value",
+          "type": "number"
+        },
+        "threshold": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Threshold",
+          "type": "number"
+        },
+        "trials": {
+          "items": {
+            "$ref": "#/$defs/ThresholdTrial"
+          },
+          "title": "Trials",
+          "type": "array"
+        }
+      },
+      "required": [
+        "threshold",
+        "objective_value",
+        "trials"
+      ],
+      "title": "ThresholdSelection",
+      "type": "object"
+    },
+    "ThresholdTrial": {
+      "additionalProperties": false,
+      "properties": {
+        "confusion": {
+          "$ref": "#/$defs/Confusion"
+        },
+        "objective_value": {
+          "title": "Objective Value",
+          "type": "number"
+        },
+        "threshold": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "required": [
+        "threshold",
+        "confusion",
+        "objective_value"
+      ],
+      "title": "ThresholdTrial",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_schema_version": {
+      "const": 1,
+      "title": "Artifact Schema Version",
+      "type": "integer"
+    },
+    "candidates": {
+      "items": {
+        "$ref": "#/$defs/CandidateResult"
+      },
+      "title": "Candidates",
+      "type": "array"
+    },
+    "dataset": {
+      "$ref": "#/$defs/DatasetEvidence"
+    },
+    "fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Fingerprint",
+      "type": "string"
+    },
+    "identity_json": {
+      "title": "Identity Json",
+      "type": "string"
+    },
+    "optimization_direction": {
+      "enum": [
+        "maximize",
+        "minimize"
+      ],
+      "title": "Optimization Direction",
+      "type": "string"
+    },
+    "plan": {
+      "$ref": "#/$defs/DecisionPlan"
+    },
+    "primary_metric": {
+      "title": "Primary Metric",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "partial",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifact_schema_version",
+    "fingerprint",
+    "identity_json",
+    "dataset",
+    "plan",
+    "primary_metric",
+    "optimization_direction",
+    "status",
+    "candidates"
+  ],
+  "title": "DecisionResult",
+  "type": "object"
+}

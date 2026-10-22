@@ -112,6 +112,7 @@ class ExperimentReport:
     pairs: tuple[PairwiseComparison, ...]
     ranks: tuple[RankStability, ...]
     limitations: tuple[str, ...]
+    decision: Evidence | None = None
 
 
 @dataclass(frozen=True)

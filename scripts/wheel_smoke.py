@@ -65,7 +65,25 @@ for html_path in (report, comparison):
     assert "<script" not in html and "<link" not in html and "@import" not in html
     assert "<table>" in html and "Content-Security-Policy" in html
 assert "COMPATIBLE" in comparison.read_text(encoding="utf-8")
-print(json.dumps({"wheel": benchforge.__file__, "benchmark": first.fingerprint,
+from benchforge import load_decision_config, run_decision_analysis
+from benchforge.decision import DecisionConfig
+policy = load_decision_config(source / "configs/examples/breast_cancer_decision.yaml")
+raw = policy.model_dump(mode="json")
+raw.update(outer_split={"n_splits": 2}, inner_split={"n_splits": 2},
+           calibration={"method": "sigmoid", "n_splits": 2},
+           output={"directory": "published"})
+raw["models"] = [m for m in raw["models"] if m["id"] == "logistic"]
+decision_config = DecisionConfig.model_validate(raw)
+decision = run_decision_analysis(decision_config)
+repeat = run_decision_analysis(decision_config)
+assert decision.model_dump() == repeat.model_dump()
+assert verify(decision.artifact_directory, deep=True).passed
+assert load_report(decision.artifact_directory, deep=True).workflow == "decision"
+generate_report(decision.artifact_directory, Path("decision.html"), deep=True)
+with Catalog(Path("decision-catalog.sqlite")) as catalog:
+    assert catalog.ingest(decision.artifact_directory) == catalog.ingest(repeat.artifact_directory)
+print(json.dumps({"decision": decision.fingerprint, "wheel": benchforge.__file__,
+    "benchmark": first.fingerprint,
     "search": result.fingerprint, "reused": second.checkpoint_reused}))
 """
 

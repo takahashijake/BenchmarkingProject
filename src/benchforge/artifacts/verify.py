@@ -329,6 +329,16 @@ def _trial_counts(records: list[Any], summary: dict[str, Any], context: str) -> 
 
 
 def _describe(e: _Evidence, kind: ArtifactType, deep: bool) -> ArtifactDescriptor:
+    if kind == ArtifactType.DECISION:
+        from benchforge.decision.verification import describe_decision
+
+        e.require("decision_config.json", "decision_result.json", "metadata.json")
+        return describe_decision(
+            e.directory,
+            e.get("decision_config.json"),
+            e.get("decision_result.json"),
+            e.get("metadata.json"),
+        )
     e.require(CONFIG_FILES[kind], "metadata.json", *REQUIRED[kind])
     config = e.get(CONFIG_FILES[kind])
     metadata = e.get("metadata.json")

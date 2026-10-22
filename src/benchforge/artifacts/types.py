@@ -15,6 +15,7 @@ class ArtifactType(StrEnum):
     SEARCH = "search"
     AUTOML = "automl"
     ROBUSTNESS = "robustness"
+    DECISION = "decision"
 
 
 class EvidenceModel(BaseModel):
@@ -39,6 +40,7 @@ class RepetitionSettings(EvidenceModel):
 
 class EvaluationEvidence(EvidenceModel):
     provider_manifests: tuple[dict[str, Any], ...] = ()
+    decision_policy_json: str | None = None
     split: SplitConfig | None = None
     outer_split: SplitConfig | None = None
     inner_split: SplitConfig | None = None

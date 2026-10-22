@@ -82,6 +82,10 @@ def build_parser() -> argparse.ArgumentParser:
         "robustness", help="evaluate stability with repeated matched cross-validation"
     )
     robustness_parser.add_argument("config", help="path to a YAML robustness configuration")
+    decision_parser = subparsers.add_parser(
+        "decision", help="evaluate calibrated binary probabilities and training-only thresholds"
+    )
+    decision_parser.add_argument("config", help="path to a YAML decision configuration")
     report_parser = subparsers.add_parser(
         "report", help="render verified artifacts as offline HTML"
     )
@@ -147,6 +151,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resume=args.resume is not None,
             )
             summary = format_search_summary(search_result)
+        elif args.command == "decision":
+            from benchforge.analysis.decision import format_decision_summary
+            from benchforge.decision import load_decision_config, run_decision_analysis
+
+            summary = format_decision_summary(
+                run_decision_analysis(load_decision_config(args.config))
+            )
         elif args.command == "robustness":
             summary = format_robustness_summary(run_robustness(load_robustness_config(args.config)))
         else:

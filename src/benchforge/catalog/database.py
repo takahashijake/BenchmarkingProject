@@ -49,7 +49,8 @@ def _semantics(descriptor: ArtifactDescriptor) -> str:
     config = json.loads(json.dumps(descriptor.configuration))
     config.pop("output", None)
     config["dataset"].pop("path", None)
-    config["metrics"] = sorted(config["metrics"])
+    if "metrics" in config:
+        config["metrics"] = sorted(config["metrics"])
     if isinstance(config.get("models"), list):
         config["models"] = sorted(config["models"], key=lambda m: m.get("id", m["name"]))
     value = {
@@ -65,6 +66,7 @@ def _semantics(descriptor: ArtifactDescriptor) -> str:
             if k not in {"scikit_learn_version", "fold_assignment_digest"}
             # Absent extension data must preserve pre-v0.12 catalog signatures.
             and (k != "provider_manifests" or v)
+            and (k != "decision_policy_json" or v is not None)
         },
         "candidates": [
             {

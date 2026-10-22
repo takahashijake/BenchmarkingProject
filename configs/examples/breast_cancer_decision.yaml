@@ -1,0 +1,26 @@
+# Binary decision contract 1; these are two fixed model configurations.
+schema_version: 1
+task: binary_classification
+dataset: {name: breast_cancer}
+outer_split: {strategy: stratified_kfold, n_splits: 3, shuffle: true}
+inner_split: {strategy: stratified_kfold, n_splits: 3, shuffle: true}
+preprocessing: {median_imputation: true, standardize: true}
+models:
+  - id: logistic
+    name: logistic_regression
+    parameters: {max_iter: 1000, C: 1.0}
+  - id: forest
+    name: random_forest_classifier
+    parameters: {n_estimators: 30, max_depth: 5, n_jobs: 1}
+# Change to none to evaluate genuine uncalibrated predict_proba probabilities.
+# Method is precommitted; outer-fold outcomes never choose it.
+calibration: {method: sigmoid, n_splits: 3}
+threshold:
+  policy: optimize
+  objective: f1
+  candidates: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+               0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0]
+primary_metric: selected.f1
+reliability_bins: 10
+seed: 42
+output: {directory: artifacts/decision}

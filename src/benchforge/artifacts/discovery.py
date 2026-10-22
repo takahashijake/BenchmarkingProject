@@ -11,6 +11,7 @@ CONFIG_FILES = {
     ArtifactType.SEARCH: "search_config.json",
     ArtifactType.AUTOML: "automl_config.json",
     ArtifactType.ROBUSTNESS: "robustness_config.json",
+    ArtifactType.DECISION: "decision_config.json",
 }
 
 
@@ -75,7 +76,8 @@ def discover(root: str | Path, *, validate: bool = True) -> DiscoveryResult:
                         level="WARNING", code="symlink_skipped", message=f"skipped symlink {entry}"
                     )
                 )
-            elif entry.is_dir():
+            elif entry.is_dir() and not entry.name.startswith(".decision-stage-"):
+                # Unpublished decision directories are owned by the staging writer.
                 visit(entry)
 
     try:
