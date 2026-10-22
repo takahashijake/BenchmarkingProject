@@ -76,6 +76,32 @@ def _prediction_score(pipeline: Pipeline, features: Any) -> np.ndarray[Any, Any]
     return None
 
 
+def build_pipeline(
+    config: RunConfig,
+    dataset: Dataset,
+    *,
+    model_registry: ModelRegistry = default_model_registry,
+) -> Pipeline:
+    """Construct a fresh fold-local pipeline without fitting or touching data rows."""
+    estimator = model_registry.create(config.model, config.seed, config.task)
+    capabilities = model_registry.capabilities(config.model.name)
+    pipeline = Pipeline(
+        [
+            (
+                "preprocessing",
+                build_preprocessor(
+                    config.preprocessing,
+                    dataset.numeric_feature_names,
+                    dataset.categorical_feature_names,
+                    dense_output=capabilities.requires_dense,
+                ),
+            ),
+            ("model", estimator),
+        ]
+    )
+    return pipeline
+
+
 def execute_fold(
     config: RunConfig,
     dataset: Dataset,
@@ -85,22 +111,7 @@ def execute_fold(
 ) -> tuple[FoldResult, tuple[PredictionRecord, ...]]:
     """Execute one immutable fold using the same kernel as a normal run."""
     try:
-        estimator = model_registry.create(config.model, config.seed, config.task)
-        capabilities = model_registry.capabilities(config.model.name)
-        pipeline = Pipeline(
-            [
-                (
-                    "preprocessing",
-                    build_preprocessor(
-                        config.preprocessing,
-                        dataset.numeric_feature_names,
-                        dataset.categorical_feature_names,
-                        dense_output=capabilities.requires_dense,
-                    ),
-                ),
-                ("model", estimator),
-            ]
-        )
+        pipeline = build_pipeline(config, dataset, model_registry=model_registry)
         train_x = dataset.features.iloc[fold.train_indices]
         train_y = dataset.target.iloc[fold.train_indices]
         validation_x = dataset.features.iloc[fold.validation_indices]

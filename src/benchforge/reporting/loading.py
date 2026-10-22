@@ -111,6 +111,10 @@ def _fold(
 
 
 def _adapt(d: ArtifactDescriptor, deep: bool) -> ExperimentReport:
+    if d.artifact_type == ArtifactType.DECISION:
+        from benchforge.reporting.decision import adapt_decision
+
+        return adapt_decision(d, deep)
     path = d.directory
     kind = d.artifact_type
     base = path / "search" if kind == ArtifactType.AUTOML else path

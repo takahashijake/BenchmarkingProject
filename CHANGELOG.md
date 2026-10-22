@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — v0.16 binary decision analysis
+
+- Add separate versioned `decision` CLI/API for fixed serial binary candidates.
+- Cross-fit full preprocessing/model pipelines for training-only sigmoid/isotonic calibration.
+- Select F1, balanced-accuracy or asymmetric-cost thresholds from inner OOF probabilities only.
+- Evaluate untouched matched outer folds and a fixed-0.5 reference on identical probabilities.
+- Persist explicit probabilities, complete nested plans/seeds, selection curves, confusion counts,
+  held-out probability diagnostics, failures, completeness and complete-only competition ranks.
+- Stage, validate, seal and publish immutable schema-1 evidence with content/dependency identities.
+- Reconstruct decision evidence offline and integrate discovery, catalog and escaped static reports.
+- Add machine-readable schemas, breast-cancer examples, leakage sentinels, adversarial artifact tests,
+  supported Python/Windows CI and repeated installed-wheel execution.
+- Preserve prior workflow behavior, fingerprints, score contracts and package/evaluator version 0.8.0.
+
 ## Unreleased — v0.15 verification-gated reporting
 
 - Add an immutable public reporting model and adapters for all five persisted workflows.

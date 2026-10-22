@@ -4,7 +4,7 @@ BenchForge is reproducible benchmarking infrastructure for classical machine lea
 strict declarative configuration into leakage-safe evidence that can be inspected and reproduced.
 
 BenchForge supports binary classification, multiclass classification, and regression through
-five workflow levels:
+five general workflow levels, plus a dedicated binary decision-analysis workflow:
 
 - `benchforge run`: execute one concrete pipeline.
 - `benchforge benchmark`: compare several concrete pipelines on shared folds.
@@ -18,6 +18,32 @@ five workflow levels:
 AutoML is compute-aware orchestration over the existing search layer, not automatic pipeline
 invention.
 
+## Binary calibration and decision analysis (v0.16)
+
+Evaluate fixed binary classifiers with optional sigmoid/isotonic calibration and
+leakage-safe inner-fold threshold selection. Matched outer folds compare each
+trained decision policy against a fixed 0.5 reference, with confusion matrices,
+precision/recall, asymmetric error costs, Brier/log loss, ROC-AUC and reliability
+bins. Only complete outer evaluations rank; no deployment cutoff is inferred.
+
+```bash
+benchforge decision configs/examples/breast_cancer_decision.yaml
+benchforge decision configs/examples/breast_cancer_decision_cost.yaml
+benchforge verify /path/to/decision_experiment --deep
+benchforge report /path/to/decision_experiment --deep --output /tmp/decision.html
+python examples/decision/demo.py --output-dir /tmp/benchforge-decision-demo
+```
+
+Python: `load_decision_config(...)` and `run_decision_analysis(...)` from
+`benchforge`. This separate schema-1 workflow preserves all historical experiment
+contracts and package/evaluator version 0.8.0. Serial built-ins only; no providers,
+AutoML or recovery. ECE is descriptive; calibration does not guarantee reliability
+under distribution shift. Original target labels remain explicit (the built-in
+breast-cancer positive class 1 means **benign**).
+See [methodology, configuration, examples and limits](docs/v0.16-decision-analysis.md),
+[architecture decision](docs/decisions/v0.16-decision-analysis.md) and
+[validation evidence](docs/v0.16-validation.md).
+
 ## Offline experiment reports (v0.15)
 
 Turn existing verified artifacts into self-contained HTML, with no training,
@@ -29,7 +55,8 @@ benchforge report /path/to/A --compare /path/to/B --output /tmp/comparison.html 
 python -m webbrowser /tmp/report.html
 ```
 
-All five workflows and all three tasks are supported. Reports preserve outer
+The five general workflows cover all three tasks; decision reports cover binary
+classification. Reports preserve outer
 versus inner selection evidence, failures, repetition statistics and provenance.
 Comparison needs no catalog and withholds deltas for partial/incompatible evidence.
 Output must be outside artifact/recovery trees; existing reports require

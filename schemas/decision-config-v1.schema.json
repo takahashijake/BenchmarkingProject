@@ -1,0 +1,384 @@
+{
+  "$defs": {
+    "CalibrationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "isotonic_min_samples": {
+          "default": 1000,
+          "minimum": 1000,
+          "title": "Isotonic Min Samples",
+          "type": "integer"
+        },
+        "method": {
+          "default": "none",
+          "enum": [
+            "none",
+            "sigmoid",
+            "isotonic"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "n_splits": {
+          "default": 3,
+          "minimum": 2,
+          "title": "N Splits",
+          "type": "integer"
+        }
+      },
+      "title": "CalibrationConfig",
+      "type": "object"
+    },
+    "DatasetConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "DatasetConfig",
+      "type": "object"
+    },
+    "FileDatasetConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_high_cardinality": {
+          "default": false,
+          "title": "Allow High Cardinality",
+          "type": "boolean"
+        },
+        "categorical_cardinality_limit": {
+          "default": 100,
+          "minimum": 2,
+          "title": "Categorical Cardinality Limit",
+          "type": "integer"
+        },
+        "id_columns": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Id Columns",
+          "type": "array"
+        },
+        "path": {
+          "format": "path",
+          "title": "Path",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "target_column": {
+          "minLength": 1,
+          "title": "Target Column",
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskType"
+        }
+      },
+      "required": [
+        "source",
+        "path",
+        "target_column",
+        "task"
+      ],
+      "title": "FileDatasetConfig",
+      "type": "object"
+    },
+    "ModelConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Parameters",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ModelConfig",
+      "type": "object"
+    },
+    "OutputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "default": "artifacts",
+          "format": "path",
+          "title": "Directory",
+          "type": "string"
+        }
+      },
+      "title": "OutputConfig",
+      "type": "object"
+    },
+    "PreprocessingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "median_imputation": {
+          "default": true,
+          "title": "Median Imputation",
+          "type": "boolean"
+        },
+        "standardize": {
+          "default": true,
+          "title": "Standardize",
+          "type": "boolean"
+        }
+      },
+      "title": "PreprocessingConfig",
+      "type": "object"
+    },
+    "SplitConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "n_splits": {
+          "default": 5,
+          "minimum": 2,
+          "title": "N Splits",
+          "type": "integer"
+        },
+        "shuffle": {
+          "const": true,
+          "default": true,
+          "title": "Shuffle",
+          "type": "boolean"
+        },
+        "strategy": {
+          "default": "stratified_kfold",
+          "enum": [
+            "stratified_kfold",
+            "kfold"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        }
+      },
+      "title": "SplitConfig",
+      "type": "object"
+    },
+    "TaskType": {
+      "enum": [
+        "binary_classification",
+        "multiclass_classification",
+        "regression"
+      ],
+      "title": "TaskType",
+      "type": "string"
+    },
+    "ThresholdConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "candidates": {
+          "default": [
+            0.0,
+            0.05,
+            0.1,
+            0.15,
+            0.2,
+            0.25,
+            0.3,
+            0.35,
+            0.4,
+            0.45,
+            0.5,
+            0.55,
+            0.6,
+            0.65,
+            0.7,
+            0.75,
+            0.8,
+            0.85,
+            0.9,
+            0.95,
+            1.0
+          ],
+          "items": {
+            "type": "number"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "false_negative_cost": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "False Negative Cost",
+          "type": "number"
+        },
+        "false_positive_cost": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "False Positive Cost",
+          "type": "number"
+        },
+        "objective": {
+          "default": "f1",
+          "enum": [
+            "f1",
+            "balanced_accuracy",
+            "misclassification_cost"
+          ],
+          "title": "Objective",
+          "type": "string"
+        },
+        "policy": {
+          "default": "fixed",
+          "enum": [
+            "fixed",
+            "optimize"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "value": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "title": "ThresholdConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "calibration": {
+      "$ref": "#/$defs/CalibrationConfig"
+    },
+    "dataset": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DatasetConfig"
+        },
+        {
+          "$ref": "#/$defs/FileDatasetConfig"
+        }
+      ],
+      "title": "Dataset"
+    },
+    "inner_split": {
+      "$ref": "#/$defs/SplitConfig"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/ModelConfig"
+      },
+      "title": "Models",
+      "type": "array"
+    },
+    "outer_split": {
+      "$ref": "#/$defs/SplitConfig"
+    },
+    "output": {
+      "$ref": "#/$defs/OutputConfig"
+    },
+    "preprocessing": {
+      "$ref": "#/$defs/PreprocessingConfig"
+    },
+    "primary_metric": {
+      "default": "selected.f1",
+      "enum": [
+        "selected.f1",
+        "selected.balanced_accuracy",
+        "selected.misclassification_cost",
+        "selected.accuracy",
+        "selected.precision",
+        "selected.recall",
+        "probability.brier_score",
+        "probability.log_loss",
+        "probability.roc_auc",
+        "probability.ece"
+      ],
+      "title": "Primary Metric",
+      "type": "string"
+    },
+    "reliability_bins": {
+      "default": 10,
+      "maximum": 100,
+      "minimum": 2,
+      "title": "Reliability Bins",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "seed": {
+      "default": 42,
+      "maximum": 4294967295,
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "task": {
+      "const": "binary_classification",
+      "default": "binary_classification",
+      "title": "Task",
+      "type": "string"
+    },
+    "threshold": {
+      "$ref": "#/$defs/ThresholdConfig"
+    }
+  },
+  "required": [
+    "dataset",
+    "models"
+  ],
+  "title": "DecisionConfig",
+  "type": "object"
+}

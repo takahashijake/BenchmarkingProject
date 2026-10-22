@@ -72,7 +72,22 @@ def configuration(task="binary_classification", **updates):
 
 def generate(root, kind, task="binary_classification", **updates):
     data = configuration(task, output={"directory": str(root)}, **updates)
-    if kind == "run":
+    if kind == "decision":
+        from benchforge.decision import DecisionConfig, run_decision_analysis
+
+        result = run_decision_analysis(
+            DecisionConfig.model_validate(
+                {
+                    "dataset": data["dataset"],
+                    "models": data["models"],
+                    "outer_split": data["split"],
+                    "inner_split": data["split"],
+                    "primary_metric": "selected.accuracy",
+                    "output": data["output"],
+                }
+            )
+        )
+    elif kind == "run":
         data["model"] = data.pop("models")[0]
         data.pop("primary_metric")
         result = run_benchmark(RunConfig.model_validate(data))
@@ -130,9 +145,30 @@ def test_workflow_detection_sealing_normalization_and_queries(artifact_tree, tmp
     assert report.integrity == "sealed"
     d = report.descriptor
     assert d.artifact_type == kind and d.seed == 42 and d.status == "success"
-    assert d.task == "binary_classification" and d.dataset_identity == "sklearn:breast_cancer:v1"
-    assert d.primary_metric == (None if kind == ArtifactType.RUN else "accuracy")
-    assert d.artifact_schema_version == (1 if kind == ArtifactType.ROBUSTNESS else None)
+    assert d.task == "binary_classification"
+    if kind == ArtifactType.DECISION:
+        result = json.loads((path / "decision_result.json").read_text(encoding="utf-8"))
+        from hashlib import sha256
+
+        label_content = {
+            "content_digest": result["dataset"]["content_digest"],
+            "target_digest": result["dataset"]["target_digest"],
+            "target_labels": result["dataset"]["target_labels"],
+        }
+        expected = sha256(
+            json.dumps(label_content, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        assert d.dataset_identity == "sha256:" + expected
+    else:
+        assert d.dataset_identity == "sklearn:breast_cancer:v1"
+    assert d.primary_metric == (
+        "selected.accuracy"
+        if kind == ArtifactType.DECISION
+        else (None if kind == ArtifactType.RUN else "accuracy")
+    )
+    assert d.artifact_schema_version == (
+        1 if kind in {ArtifactType.ROBUSTNESS, ArtifactType.DECISION} else None
+    )
     manifest = Manifest.model_validate_json((path / "manifest.json").read_text())
     assert tuple(m.path for m in manifest.files) == inventory(path)
     assert all(digest(path / m.path) == m.sha256 for m in manifest.files)
@@ -155,7 +191,7 @@ def test_workflow_detection_sealing_normalization_and_queries(artifact_tree, tmp
 def test_discovery_deterministic_parent_ownership_symlink_and_ambiguity(artifact_tree, tmp_path):
     first = discover(artifact_tree[0])
     assert first == discover(artifact_tree[0])
-    assert len(first.directories) == 5  # nested runs and AutoML search are parent-owned
+    assert len(first.directories) == 6  # nested runs and AutoML search are parent-owned
     path = copy_artifact(tmp_path, artifact_tree)
     (tmp_path / "alias").symlink_to(path, target_is_directory=True)
     result = discover(tmp_path)
@@ -248,7 +284,18 @@ def test_broken_nested_evidence(artifact_tree, tmp_path, kind, member):
     assert any(d.file == member and d.code == "missing_member" for d in report.diagnostics)
 
 
-@pytest.mark.parametrize("kind", list(ArtifactType))
+# These are the five workflows that existed in V0.7. Decision schema 1 has
+# never had a legacy/unsealed representation; its seal is mandatory.
+@pytest.mark.parametrize(
+    "kind",
+    [
+        ArtifactType.RUN,
+        ArtifactType.BENCHMARK,
+        ArtifactType.SEARCH,
+        ArtifactType.AUTOML,
+        ArtifactType.ROBUSTNESS,
+    ],
+)
 def test_legacy_formats_remain_readable_and_catalogable(artifact_tree, tmp_path, kind):
     path = copy_artifact(tmp_path, artifact_tree, kind.value)
     # Remove seals and V0.8 additions; reproduce actual V0.7 fingerprint algorithms.

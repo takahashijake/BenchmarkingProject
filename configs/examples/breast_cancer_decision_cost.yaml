@@ -1,0 +1,21 @@
+# In sklearn breast_cancer, class 1 means BENIGN and class 0 means MALIGNANT.
+# A false positive therefore calls a malignant case benign. This demonstration
+# assigns that error a higher hypothetical cost; these are not clinical utilities.
+schema_version: 1
+task: binary_classification
+dataset: {name: breast_cancer}
+outer_split: {n_splits: 3}
+inner_split: {n_splits: 3}
+models:
+  - {id: logistic, name: logistic_regression, parameters: {max_iter: 1000}}
+  - {id: baseline, name: dummy_classifier, parameters: {strategy: prior}}
+calibration: {method: sigmoid, n_splits: 3}
+threshold:
+  policy: optimize
+  objective: misclassification_cost
+  false_positive_cost: 8.0
+  false_negative_cost: 1.0
+primary_metric: selected.misclassification_cost
+reliability_bins: 10
+seed: 42
+output: {directory: artifacts/decision-cost}

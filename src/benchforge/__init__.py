@@ -18,6 +18,12 @@ if TYPE_CHECKING:
         load_run_config,
         load_search_config,
     )
+    from benchforge.decision import (
+        DecisionConfig,
+        DecisionResult,
+        load_decision_config,
+        run_decision_analysis,
+    )
     from benchforge.execution.benchmark import BenchmarkResult, run_benchmark_suite
     from benchforge.execution.runner import RunResult, run_benchmark
     from benchforge.robustness import (
@@ -29,6 +35,10 @@ if TYPE_CHECKING:
     from benchforge.search import SearchResult, run_search
 
 _EXPORTS = {
+    "DecisionConfig": ("benchforge.decision", "DecisionConfig"),
+    "DecisionResult": ("benchforge.decision", "DecisionResult"),
+    "load_decision_config": ("benchforge.decision", "load_decision_config"),
+    "run_decision_analysis": ("benchforge.decision", "run_decision_analysis"),
     "__version__": ("benchforge._version", "__version__"),
     "AutoMLPlan": ("benchforge.automl", "AutoMLPlan"),
     "AutoMLResult": ("benchforge.automl", "AutoMLResult"),
@@ -55,6 +65,10 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "DecisionConfig",
+    "DecisionResult",
+    "load_decision_config",
+    "run_decision_analysis",
     "AutoMLConfig",
     "AutoMLPlan",
     "AutoMLResult",

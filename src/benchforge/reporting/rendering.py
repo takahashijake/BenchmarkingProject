@@ -342,12 +342,118 @@ def _robustness(r: ExperimentReport) -> str:
     return body
 
 
+def _decision(r: ExperimentReport) -> str:
+    assert r.decision is not None
+    evidence = r.decision.decode()
+    labels = r.dataset.decode().get("target_labels") if r.dataset else None
+    body = facts(
+        (
+            ("Class 0 label", labels[0] if labels else None),
+            ("Positive class 1 label", labels[1] if labels else None),
+            ("Calibration", evidence["calibration"]["method"]),
+            (
+                "Calibration CV splits",
+                evidence["calibration"]["n_splits"]
+                if evidence["calibration"]["method"] != "none"
+                else None,
+            ),
+            ("Threshold policy", evidence["threshold"]["policy"]),
+            ("Selection objective", evidence["threshold"]["objective"]),
+            ("False-positive cost", evidence["threshold"]["false_positive_cost"]),
+            ("False-negative cost", evidence["threshold"]["false_negative_cost"]),
+        )
+    )
+    body += '<p class="notice">Inner selection objectives are selection-only. '
+    body += "The following comparisons use matched untouched outer probabilities.</p>"
+    body += "<p>Positive decisions use P(encoded class 1) &gt;= threshold. "
+    body += "FP means class 0 predicted as 1; FN means class 1 predicted as 0. "
+    if evidence["calibration"]["method"] == "none":
+        body += "Calibration is disabled; probabilities come directly from predict_proba.</p>"
+    else:
+        body += "Calibration cross-fits the full preprocessing/model pipeline within training "
+        body += "boundaries, with ensemble=False, then refits the base model on that boundary.</p>"
+    rows = []
+    for candidate in evidence["candidates"]:
+        for fold in candidate["folds"]:
+            for name in ("selected", "reference"):
+                policy = fold[name]
+                counts = policy["confusion"]
+                metrics = {m["name"]: m["value"] for m in policy["metrics"]}
+                rows.append(
+                    [
+                        text(candidate["identifier"]),
+                        number(fold["fold_id"]),
+                        text(name),
+                        number(policy["threshold"]),
+                        *(number(counts[k]) for k in ("tn", "fp", "fn", "tp")),
+                        *(
+                            number(metrics[k])
+                            for k in (
+                                "precision",
+                                "recall",
+                                "f1",
+                                "balanced_accuracy",
+                                "misclassification_cost",
+                            )
+                        ),
+                    ]
+                )
+    body += table(
+        "Selected policy versus fixed 0.5 reference on each outer fold",
+        [
+            "Candidate",
+            "Outer fold",
+            "Policy",
+            "Threshold",
+            "TN",
+            "FP",
+            "FN",
+            "TP",
+            "Precision",
+            "Recall",
+            "F1",
+            "Balanced accuracy",
+            "Cost per sample",
+        ],
+        rows,
+    )
+    body += "<h3>Held-out probability quality and reliability bins</h3>"
+    for candidate in evidence["candidates"]:
+        for fold in candidate["folds"]:
+            q = fold["probability_quality"]
+            body += "<h4>" + text(candidate["identifier"]) + ", outer fold "
+            body += number(fold["fold_id"]) + "</h4>"
+            body += facts((k, q[k]) for k in ("brier_score", "log_loss", "roc_auc", "ece"))
+            body += table(
+                "Reliability bins: [lower, upper), final upper inclusive",
+                ["Lower", "Upper", "Count", "Mean probability", "Positive fraction"],
+                (
+                    [
+                        number(b[k])
+                        for k in (
+                            "lower",
+                            "upper",
+                            "count",
+                            "mean_probability",
+                            "positive_fraction",
+                        )
+                    ]
+                    for b in q["bins"]
+                ),
+            )
+    body += "<h3>Inner threshold selection (selection evidence only)</h3>"
+    body += "".join(details(f"{f.candidate}, outer fold {f.fold_id}", f.selection) for f in r.folds)
+    return body
+
+
 def _experiment(r: ExperimentReport, prefix: str) -> str:
     body = section(prefix + "overview", "Overview", _overview(r))
     body += section(prefix + "leaderboard", "Leaderboard", _leaderboard(r))
     body += section(prefix + "evaluation", "Evaluation", _evaluation(r))
     if r.workflow in {"search", "automl"}:
         body += section(prefix + "search", "Search and AutoML", _search(r))
+    if r.workflow == "decision":
+        body += section(prefix + "decision", "Calibration and decision analysis", _decision(r))
     if r.workflow == "robustness":
         body += section(prefix + "robustness", "Robustness", _robustness(r))
     body += section(

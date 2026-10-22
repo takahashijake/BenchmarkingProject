@@ -338,3 +338,40 @@ preprocessing/dependency evidence. Partial or incompatible comparisons withhold
 deltas. Robustness interpretation reuses existing analysis; search leaderboards
 use only stored outer results. Standard/deep verification and sealed/unsealed
 status stay explicit. See [reporting design, usage and limits](v0.15-reporting.md).
+
+
+## V0.16 binary decision-analysis boundary
+
+`decision.config` owns a separate strict schema-1 binary fixed-candidate policy.
+`decision.planning` preflights deterministic outer/inner/calibration plans in global
+index space using the existing split/seed helpers. `decision.runner` resolves data
+once, reuses the extracted `execution.runner.build_pipeline()` constructor, and
+wraps that full pipeline in training-only `CalibratedClassifierCV(ensemble=False)`.
+Inner OOF probabilities train a threshold; final training-only calibration/refit
+precedes the exactly-once untouched outer prediction. Raw margins never enter the
+new explicit probability contract. Existing `execute_fold()` scoring is unchanged.
+
+`decision.metrics` reuses classification/aggregation primitives and owns exact
+rational threshold objectives, deterministic ties, costs and probability diagnostics.
+`decision.results` contains frozen tuple/scalar evidence. Only complete candidates
+rank on declared outer metrics; failed/partial results retain observed folds and
+failure records. No averaged threshold is a validated deployment policy.
+
+`storage.decision` stages/flushed/fsyncs evidence, validates/seals through existing
+manifest machinery and publishes a complete directory by same-filesystem rename.
+An advisory publication lock coordinates writers and supports Windows; discovery
+ignores unpublished staging. The offline decision adapter reconstructs all nested
+plans, selections, predictions, metrics, bins, aggregates and ranks without data
+resolution, model construction/fitting or provider activation. It emits existing
+typed descriptors plus optional decision policy evidence. Absent policy fields
+are omitted from historical catalog signatures, preserving prior catalog identity.
+Normalized decision dataset identity hashes resolved content and original label meanings; source identity
+and target labels remain in dataset evidence.
+
+Reporting adapts summaries only, reuses existing escaping/publication and static
+HTML, and adds visible label orientation, matched confusion/cost tables, per-fold
+thresholds, held-out probability diagnostics and methodological limits. No older
+artifact is migrated or reinterpreted. Package/evaluator version stays 0.8.0.
+See [decision and alternatives](decisions/v0.16-decision-analysis.md),
+[scientific contracts and usage](v0.16-decision-analysis.md) and
+[actual validation](v0.16-validation.md).
