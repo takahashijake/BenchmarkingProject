@@ -103,6 +103,12 @@ class FinalCandidate:
 
 
 @dataclass(frozen=True)
+class SearchTaskDiagnostic:
+    task_id: str
+    outcome: str
+
+
+@dataclass(frozen=True)
 class SearchResult:
     fingerprint: str
     dataset: DatasetSummary
@@ -122,3 +128,7 @@ class SearchResult:
     checkpoint_reused: tuple[str, ...] = ()
     checkpoint_executed: tuple[str, ...] = ()
     checkpoint_invalid: tuple[str, ...] = ()
+    execution_mode: str = "serial"
+    execution_workers: int = 1
+    execution_planned_tasks: int = 0
+    execution_diagnostics: tuple[SearchTaskDiagnostic, ...] = ()

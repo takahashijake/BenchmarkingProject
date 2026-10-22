@@ -37,6 +37,23 @@ assert not recovered.checkpoint_executed
 assert recovered.fingerprint == result.fingerprint
 assert not result.failures
 assert verify(result.artifact_directory, deep=True).passed
+parallel = load_search_config(source / "configs/examples/breast_cancer_search.yaml")
+parallel = parallel.model_copy(update={
+    "models": tuple(m for m in parallel.models if m.id in {"logistic", "dummy"}),
+    "budget": parallel.budget.model_copy(update={"trials_per_outer_fold": 1}),
+    "final_search": parallel.final_search.model_copy(update={"enabled": False}),
+    "output": OutputConfig(directory=Path("published")),
+})
+serial = run_search(parallel, persist=False)
+isolated = run_search(parallel, workers=2, checkpoint_dir=Path("parallel-workspace"))
+resumed = run_search(parallel, workers=1, checkpoint_dir=Path("parallel-workspace"), resume=True)
+assert serial.fingerprint == isolated.fingerprint == resumed.fingerprint
+assert len(resumed.checkpoint_reused) == 4
+assert [f.predictions for f in serial.families] == [f.predictions for f in isolated.families]
+assert ([f.aggregate_metrics for f in serial.families]
+    == [f.aggregate_metrics for f in isolated.families])
+assert verify(isolated.artifact_directory, deep=True).passed
+assert verify(resumed.artifact_directory, deep=True).passed
 print(json.dumps({"wheel": benchforge.__file__, "benchmark": first.fingerprint,
     "search": result.fingerprint, "reused": second.checkpoint_reused}))
 """

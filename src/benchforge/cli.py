@@ -65,6 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--plan-only", action="store_true", help="print the deterministic plan without training"
     )
     for recovery_parser in (search_parser, automl_parser):
+        recovery_parser.add_argument(
+            "--workers",
+            type=int,
+            default=1,
+            help="maximum family/outer-fold processes (default: 1)",
+        )
         recovery_args = recovery_parser.add_mutually_exclusive_group()
         recovery_args.add_argument(
             "--workspace", type=Path, help="create a complete outer-fold checkpoint workspace"
@@ -108,6 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "search":
             search_result = run_search(
                 load_search_config(args.config),
+                workers=args.workers,
                 checkpoint_dir=args.workspace or args.resume,
                 resume=args.resume is not None,
             )
@@ -117,33 +124,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             automl_config = load_automl_config(args.config)
             if args.plan_only:
+                from benchforge.search.parallel import validate_workers
+
+                validate_workers(args.workers)
                 if args.workspace or args.resume:
                     raise ValueError("--plan-only cannot be combined with workspace recovery")
                 summary = format_automl_plan(build_automl_plan(automl_config))
             else:
                 automl_result = run_automl(
                     automl_config,
+                    workers=args.workers,
                     checkpoint_dir=args.workspace or args.resume,
                     resume=args.resume is not None,
                 )
                 summary = format_automl_summary(automl_result)
-        if args.command in {"search", "automl"} and (args.workspace or args.resume):
+        if args.command in {"search", "automl"} and not (
+            args.command == "automl" and args.plan_only
+        ):
             recovered_search = (
                 search_result if args.command == "search" else automl_result.search_result
             )
-            expected_tasks = recovered_search.outer_fold_count * (
-                len(recovered_search.families) + len(recovered_search.failures)
-            ) + int(recovered_search.final_candidate is not None)
-            remaining_tasks = (
-                expected_tasks
-                - len(recovered_search.checkpoint_reused)
-                - len(recovered_search.checkpoint_executed)
-            )
+            outcomes = recovered_search.execution_diagnostics
+            completed = sum(d.outcome == "success" for d in outcomes)
+            reused = sum(d.outcome == "reused" for d in outcomes)
+            failed = sum(d.outcome == "failed" for d in outcomes)
             summary += (
-                f"\nReused tasks: {len(recovered_search.checkpoint_reused)}"
-                f"\nExecuted tasks: {len(recovered_search.checkpoint_executed)}"
+                f"\nExecution mode: {recovered_search.execution_mode} "
+                f"({recovered_search.execution_workers} workers)"
+                f"\nPlanned tasks: {recovered_search.execution_planned_tasks}"
+                f"\nReused tasks: {reused}"
+                f"\nExecuted tasks: {completed}"
+                f"\nFailed tasks: {failed}"
                 f"\nInvalid checkpoints: {len(recovered_search.checkpoint_invalid)}"
-                f"\nRemaining tasks: {remaining_tasks}"
+                f"\nRemaining tasks: "
+                f"{recovered_search.execution_planned_tasks - completed - reused - failed}"
             )
     except KeyboardInterrupt:
         print("benchforge: interrupted; committed checkpoints can be resumed", file=sys.stderr)

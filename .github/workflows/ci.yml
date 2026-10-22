@@ -25,3 +25,13 @@ jobs:
       - run: python -m build
       - run: python -m pip install --force-reinstall --no-deps dist/*.whl
       - run: python scripts/wheel_smoke.py
+  windows-parallel:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -e '.[dev]' ./examples/provider
+      - run: python -m pytest -q tests/test_search_parallel.py -k portable
