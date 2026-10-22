@@ -664,3 +664,25 @@ def test_original_label_meanings_are_part_of_comparison_identity(
     a, b = verify(old.artifact_directory).descriptor, verify(new.artifact_directory).descriptor
     assert a.dataset_identity != b.dataset_identity
     assert compare_descriptors(a, b, "A", "B").compatibility == "incompatible"
+
+
+def test_decision_cannot_be_forged_as_legacy_unsealed(decision_artifact, tmp_path):
+    from hashlib import sha256
+
+    path = copy_artifact(decision_artifact, tmp_path)
+    result = read(path / "decision_result.json")
+    identity = json.loads(result["identity_json"])
+    identity["versions"]["benchforge"] = "0.7.0"
+    result["identity_json"] = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    result["fingerprint"] = sha256(result["identity_json"].encode()).hexdigest()
+    metadata = read(path / "metadata.json")
+    metadata.update(benchforge_version="0.7.0", decision_fingerprint=result["fingerprint"])
+    metadata["versions"]["benchforge"] = "0.7.0"
+    rewrite(path / "decision_result.json", result)
+    rewrite(path / "metadata.json", metadata)
+    (path / "manifest.json").unlink()
+    report = verify(path, deep=True)
+    assert not report.passed
+    assert any("requires manifest.json" in d.message for d in report.diagnostics)
+    with pytest.raises(VerificationError):
+        generate_report(path, tmp_path / "forged.html", allow_legacy=True, deep=True)

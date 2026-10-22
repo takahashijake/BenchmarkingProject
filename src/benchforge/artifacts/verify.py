@@ -1194,6 +1194,8 @@ def verify(
                     "does not execute provider code or recompute custom metric semantics.",
                 )
             )
+        if kind == ArtifactType.DECISION and not _allow_unsealed:
+            _check(manifest is not None, "decision artifact requires manifest.json")
         if manifest is None and descriptor.benchforge_version is not None and not _allow_unsealed:
             version_parts = descriptor.benchforge_version.split(".")
             if len(version_parts) >= 2 and all(part.isdigit() for part in version_parts[:2]):
