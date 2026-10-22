@@ -305,7 +305,13 @@ def _adapt(d: ArtifactDescriptor, deep: bool) -> ExperimentReport:
         tuple(candidates),
         tuple(folds),
         Evidence.capture("persisted configuration", config),
-        Evidence.capture("verified evaluation descriptor", d.evaluation.model_dump(mode="json")),
+        Evidence.capture(
+            "verified evaluation descriptor + configuration.preprocessing",
+            {
+                **d.evaluation.model_dump(mode="json"),
+                "preprocessing": science_config.get("preprocessing"),
+            },
+        ),
         Evidence.capture("metadata.json", d.source_metadata),
         Evidence.capture("dataset summary", dataset) if dataset else None,
         Evidence.capture("failures.json", failures),

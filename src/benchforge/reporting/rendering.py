@@ -457,6 +457,11 @@ def render_comparison(report: ComparisonReport) -> str:
             ["Dataset identity", text(r.a.dataset_identity), text(r.b.dataset_identity)],
             ["Task", text(r.a.task), text(r.b.task)],
             ["Primary metric", text(r.a.primary_metric), text(r.b.primary_metric)],
+            [
+                "Optimization direction",
+                text(next((m.direction for m in r.a.metrics if m.primary), None)),
+                text(next((m.direction for m in r.b.metrics if m.primary), None)),
+            ],
             ["Status", text(r.a.status), text(r.b.status)],
         ),
     )

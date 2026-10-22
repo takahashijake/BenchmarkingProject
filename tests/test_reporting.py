@@ -102,13 +102,19 @@ def test_real_workflow_values_determinism_and_source_immutability(evidence, tmp_
     before = hashes(path)
     report = load_report(path, deep=True)
     assert report.workflow == kind and report.task == task
+    assert (
+        report.evaluation.decode()["preprocessing"]
+        == report.configuration.decode()["preprocessing"]
+    )
     assert report.verification.integrity == "sealed" and report.verification.deep
     base = path / "search" if kind == "automl" else path
     if kind == "run":
         board = [
             {
                 "model_identifier": report.candidates[0].identifier,
-                "metrics": json.loads((path / "aggregate_metrics.json").read_text()),
+                "metrics": json.loads(
+                    (path / "aggregate_metrics.json").read_text(encoding="utf-8")
+                ),
             }
         ]
         assert report.primary_metric is None and report.candidates[0].rank is None
@@ -119,7 +125,7 @@ def test_real_workflow_values_determinism_and_source_immutability(evidence, tmp_
             "automl": "tuned_leaderboard",
             "robustness": "robustness_leaderboard",
         }[kind]
-        board = json.loads((base / f"{name}.json").read_text())
+        board = json.loads((base / f"{name}.json").read_text(encoding="utf-8"))
         assert report.primary_metric == (
             "root_mean_squared_error" if task == "regression" else "accuracy"
         )
@@ -173,21 +179,25 @@ def test_nested_selection_is_distinct_from_unbiased_outer_scores(evidence, kind)
     assert "outer evaluation only" in html
     assert "not unbiased performance estimates" in html
     if kind == "search":
-        original = json.loads((report.directory / "final_candidate.json").read_text())
+        original = json.loads(
+            (report.directory / "final_candidate.json").read_text(encoding="utf-8")
+        )
         assert report.final_selection.decode()["parameters"] == original["parameters"]
         assert (
             report.final_selection.decode()["cv_selection_score"] == original["cv_selection_score"]
         )
         assert "trials" not in report.final_selection.decode()
     else:
-        assert report.plan.decode() == json.loads((report.directory / "plan.json").read_text())
+        assert report.plan.decode() == json.loads(
+            (report.directory / "plan.json").read_text(encoding="utf-8")
+        )
 
 
 @pytest.mark.parametrize("task", TASKS)
 def test_robustness_exact_statistics_and_existing_interpretations(evidence, task):
     path = evidence["robustness", task]
     report = load_report(path, deep=True)
-    original = json.loads((path / "pairwise_comparisons.json").read_text())
+    original = json.loads((path / "pairwise_comparisons.json").read_text(encoding="utf-8"))
     assert json.loads(json.dumps([dataclasses.asdict(p) for p in report.pairs])) == original
     html = render_report(report)
     parser = check_html(html)
@@ -199,7 +209,7 @@ def test_robustness_exact_statistics_and_existing_interpretations(evidence, task
         )
         assert str(pair.interval.lower_bound) in parser.values
     assert all(w in report.limitations for w in ROBUSTNESS_LIMITATIONS)
-    stored_ranks = json.loads((path / "rank_stability.json").read_text())
+    stored_ranks = json.loads((path / "rank_stability.json").read_text(encoding="utf-8"))
     for rank in report.ranks:
         row = next(r for r in stored_ranks if r["model_identifier"] == rank.model_identifier)
         assert rank.first_place_rate == row["first_place_rate"]
@@ -250,7 +260,9 @@ def test_reporting_cannot_fit_load_data_activate_providers_or_execute_optuna(
 def test_corrupt_evidence_rejected_before_publication(evidence, tmp_path, mutation, code):
     path = clone(evidence, tmp_path)
     if mutation == "hash":
-        (path / "metadata.json").write_text((path / "metadata.json").read_text() + " ")
+        (path / "metadata.json").write_text(
+            (path / "metadata.json").read_text(encoding="utf-8") + " "
+        )
     elif mutation == "missing":
         (path / "predictions.csv").unlink()
     elif mutation == "manifest":
@@ -291,7 +303,7 @@ def test_allow_legacy_cannot_excuse_missing_modern_seal(evidence, tmp_path, kind
 def test_legacy_opt_in_missing_metadata_and_cli(evidence, tmp_path, capsys):
     path = clone(evidence, tmp_path)
     (path / "manifest.json").unlink()
-    config = RunConfig.model_validate_json((path / "config.json").read_text())
+    config = RunConfig.model_validate_json((path / "config.json").read_text(encoding="utf-8"))
     edit(
         path / "metadata.json",
         lambda d: (
@@ -407,8 +419,8 @@ def test_compatible_comparison_without_database(evidence, tmp_path, task):
         )
     assert any(c.parameters_changed for c in report.changes)
     output = generate_report(a, tmp_path / "comparison.html", compare=b, deep=True)
-    assert output.read_text() == render_comparison(report)
-    check_html(output.read_text())
+    assert output.read_text(encoding="utf-8") == render_comparison(report)
+    check_html(output.read_text(encoding="utf-8"))
     assert not list(tmp_path.rglob("*.sqlite*"))
 
 
@@ -518,17 +530,17 @@ def test_output_overwrite_is_explicit_and_atomic(evidence, tmp_path, monkeypatch
     output.write_text("previous report")
     with pytest.raises(ReportingError, match="already exists"):
         generate_report(source, output)
-    assert output.read_text() == "previous report"
+    assert output.read_text(encoding="utf-8") == "previous report"
     original_replace = publication.os.replace
 
     def inspect_staged(staged, target):
-        assert Path(staged).read_text().endswith("</html>\n")
-        assert output.read_text() == "previous report"
+        assert Path(staged).read_text(encoding="utf-8").endswith("</html>\n")
+        assert output.read_text(encoding="utf-8") == "previous report"
         return original_replace(staged, target)
 
     monkeypatch.setattr(publication.os, "replace", inspect_staged)
     generate_report(source, output, overwrite=True)
-    check_html(output.read_text())
+    check_html(output.read_text(encoding="utf-8"))
     assert not list(tmp_path.glob(".benchforge-report-*"))
 
 
@@ -562,10 +574,10 @@ def test_failed_publication_keeps_original_and_cleans_staging(
     assert before == hashes(source)
     assert not list(tmp_path.glob(".benchforge-report-*"))
     assert (
-        output.read_text() == "previous"
+        output.read_text(encoding="utf-8") == "previous"
         if overwrite
         else (
-            output.read_text() == "concurrent publisher"
+            output.read_text(encoding="utf-8") == "concurrent publisher"
             if failure == "race"
             else not output.exists()
         )
@@ -637,7 +649,7 @@ def test_cli_success_comparison_failures_and_real_subprocess(evidence, tmp_path,
         capture_output=True,
         text=True,
     )
-    check_html(output.read_text())
+    check_html(output.read_text(encoding="utf-8"))
 
 
 def test_unavailable_provider_and_custom_metric_never_imported(tmp_path):
@@ -675,7 +687,7 @@ generate_report(sys.argv[1], sys.argv[2], deep=True)
         capture_output=True,
         text=True,
     )
-    check_html(output.read_text())
+    check_html(output.read_text(encoding="utf-8"))
 
 
 def test_semantically_invalid_rehashed_evidence_is_not_reportable(evidence, tmp_path):
@@ -741,7 +753,7 @@ def test_secondary_metrics_keep_individual_directions_and_variability(tmp_path):
         "root_mean_squared_error": "minimize",
     }
     assert {m.name for m in report.metrics if m.primary} == {"root_mean_squared_error"}
-    rows = json.loads((source / "leaderboard.json").read_text())
+    rows = json.loads((source / "leaderboard.json").read_text(encoding="utf-8"))
     for c in report.candidates:
         stored = next(r for r in rows if r["model_identifier"] == c.identifier)
         for score in c.scores:
@@ -757,7 +769,7 @@ def test_secondary_metrics_keep_individual_directions_and_variability(tmp_path):
 def test_nonfinite_json_is_rejected_even_in_rehashed_metadata(evidence, tmp_path, member, value):
     source = clone(evidence, tmp_path)
     target = source / member
-    data = target.read_text().rstrip()
+    data = target.read_text(encoding="utf-8").rstrip()
     target.write_text(data[:-1] + ', "nonfinite": ' + value + "}")
     edit(
         source / "manifest.json",
