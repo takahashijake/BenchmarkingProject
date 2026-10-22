@@ -199,7 +199,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{recovered_search.execution_planned_tasks - completed - reused - failed}"
             )
     except KeyboardInterrupt:
-        print("benchforge: interrupted; committed checkpoints can be resumed", file=sys.stderr)
+        message = (
+            "benchforge: interrupted; decision analysis has no checkpoint recovery"
+            if args.command == "decision"
+            else "benchforge: interrupted; committed checkpoints can be resumed"
+        )
+        print(message, file=sys.stderr)
         return 130
     except (ValidationError, ValueError, RuntimeError, OSError) as exc:
         print(f"benchforge: error: {exc}", file=sys.stderr)

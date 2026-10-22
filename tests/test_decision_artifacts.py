@@ -686,3 +686,27 @@ def test_decision_cannot_be_forged_as_legacy_unsealed(decision_artifact, tmp_pat
     assert any("requires manifest.json" in d.message for d in report.diagnostics)
     with pytest.raises(VerificationError):
         generate_report(path, tmp_path / "forged.html", allow_legacy=True, deep=True)
+
+
+def test_decision_interrupt_never_claims_checkpoint_recovery(
+    monkeypatch,
+    decision_artifact,
+    tmp_path,
+    capsys,
+):
+    import benchforge.decision as decision
+
+    source = tmp_path / "interrupted.yaml"
+    source.write_text(
+        yaml.safe_dump(decision_artifact[0].model_dump(mode="json")), encoding="utf-8"
+    )
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(decision, "run_decision_analysis", interrupted)
+    assert main(["decision", str(source)]) == 130
+    output = capsys.readouterr()
+    assert not output.out
+    assert "decision analysis has no checkpoint recovery" in output.err
+    assert "can be resumed" not in output.err
