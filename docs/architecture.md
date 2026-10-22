@@ -300,3 +300,23 @@ resolved canonical plan into this same workspace and holds its lock through
 parent sealing. Scientific artifact identity is unchanged. See [the recovery
 decision and lifecycle](v0.13-recovery.md) for rejected trial/RDB alternatives,
 timeout restrictions, validation rules and reproducibility boundaries.
+
+## V0.14 bounded parallel nested search
+
+`search.parallel` records frozen candidate/fold task identities and index tuples,
+loads valid workspace successes, and dispatches only missing tasks through the
+existing subprocess supervisor. The direct serial path and isolated workers call
+the same `search.runner._search_outer`; aggregation and final search remain in
+the coordinator. `SearchEvidenceValidator` shares v0.13 scientific validation
+between ephemeral worker results and checkpoint publication/reuse. Workers never
+receive workspace paths or write artifacts. AutoML delegates to this same path.
+
+All required tasks run despite sibling failures; only complete successful families
+are ranked. Canonical candidate/fold order controls failure selection, aggregation
+and diagnostics. Worker count and diagnostics are execution policy, excluded from
+scientific identity and persisted evidence. Serial pinned providers remain
+supported; parallel providers and study wall-clock limits are explicitly rejected.
+POSIX process groups retain the fixed-benchmark lifecycle; Windows unbudgeted
+subprocesses promise only direct-worker cleanup. See
+[the decision, restrictions and lifecycle](v0.14-parallel-search.md) and
+[validation evidence](v0.14-validation.md).

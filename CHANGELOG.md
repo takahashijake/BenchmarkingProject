@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — v0.14 parallel search and AutoML
+
+- Add bounded process execution with `--workers N` and Python `workers=N` (default 1).
+- Plan immutable family/outer-fold tasks and reuse one scientific fold function in both modes.
+- Reuse the subprocess supervisor with thread caps, crash isolation and canonical aggregation.
+- Validate worker evidence and preserve coordinator-owned v0.13 recovery and atomic publication.
+- Keep worker count outside scientific fingerprints, artifact schemas and workspace identity.
+- Reject parallel study timeouts, providers, custom registries and nested `n_jobs` oversubscription.
+- Support unbudgeted Windows subprocesses with direct-worker cleanup; retain POSIX group cleanup.
+- Expose runtime-only task diagnostics, add real-process regression tests and Windows CI coverage.
+
 ## Unreleased — v0.13 durable search and AutoML
 
 - Add opt-in `--workspace`/`--resume` and Python `checkpoint_dir`/`resume` interfaces.

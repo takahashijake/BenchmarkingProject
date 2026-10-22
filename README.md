@@ -82,11 +82,53 @@ candidate models in up to N processes with a shared, deterministic CV fold plan.
 On POSIX, `--candidate-timeout SECONDS` and `--run-timeout SECONDS` enforce
 candidate termination, including with one worker. Crashes and over-budget work
 remain explicit, unranked failures; completed checkpoints can be resumed.
-It does not parallelize nested search, robustness, or AutoML. See
+This supervisor also supports nested search and AutoML as described below. Robustness
+keeps its serial contract. See
 [supervision, platform limits and recovery](docs/v0.11-execution.md).
 
 ```bash
 benchforge benchmark configs/examples/breast_cancer_suite.yaml --workers 2
+```
+
+## Parallel nested search and AutoML (v0.14)
+
+Use `--workers N` to run independent family/outer-fold tasks in up to N processes.
+The default is one direct serial worker. Trial proposals, folds, rankings and
+scientific fingerprints retain their serial meanings. Complete successes are
+checkpointed by the coordinator; resume can use a different worker count.
+
+```bash
+benchforge search configs/examples/breast_cancer_search.yaml --workers 4 \
+  --workspace artifacts/recovery/parallel-binary
+benchforge search configs/examples/breast_cancer_search.yaml --workers 2 \
+  --resume artifacts/recovery/parallel-binary
+benchforge search configs/examples/iris_multiclass_search.yaml --workers 2
+benchforge search configs/examples/diabetes_regression_search.yaml --workers 2
+benchforge automl configs/examples/breast_cancer_automl.yaml --workers 4 \
+  --workspace artifacts/recovery/parallel-automl
+benchforge automl configs/examples/breast_cancer_automl.yaml --workers 2 \
+  --resume artifacts/recovery/parallel-automl
+benchforge automl configs/examples/iris_multiclass_automl.yaml --workers 2 --plan-only
+```
+
+Use at most the detected logical CPU count and choose fewer workers when memory
+is limited. Each process holds private data and estimator state. Parallelism
+requires built-in registries, trial-count budgets and model `n_jobs=1`; external
+providers and Optuna wall-clock study timeouts remain serial-only. Windows
+supports unbudgeted workers with direct-process cleanup; POSIX additionally
+cleans their process groups. See [architecture and limits](docs/v0.14-parallel-search.md)
+and [actual validation results](docs/v0.14-validation.md).
+
+```python
+from pathlib import Path
+from benchforge import load_search_config, load_automl_config, run_search, run_automl
+
+config = load_search_config("configs/examples/iris_multiclass_search.yaml")
+run_search(config, workers=2, checkpoint_dir=Path("artifacts/recovery/python-parallel"))
+result = run_search(config, workers=1, checkpoint_dir=Path("artifacts/recovery/python-parallel"),
+                    resume=True)
+print(result.execution_mode, result.execution_diagnostics)
+run_automl(load_automl_config("configs/examples/diabetes_regression_automl.yaml"), workers=2)
 ```
 
 ## Installation and examples
@@ -487,12 +529,13 @@ See [the architecture document](docs/architecture.md) for dependency boundaries.
 
 ## Current limitations and roadmap
 
-V0.7 search and AutoML are single-process. AutoML does not invent pipelines or adapt family budgets
+Search and AutoML support bounded family/outer-fold processes with trial-count budgets.
+AutoML does not invent pipelines or adapt family budgets
 from outer-fold evidence. BenchForge does not implement multiclass ROC-AUC, pruning,
 multi-objective search, arbitrary pipelines, feature-selection or preprocessing search, XGBoost,
 LightGBM, CatBoost, neural networks, GPUs, distributed workers, statistical
-significance testing, a persistent analytics catalog, model deployment, or a web UI. Adaptive
-racing may be considered only if it can operate wholly inside outer-training partitions.
+significance testing, model deployment, or a web UI. The SQLite experiment catalog is available.
+Adaptive racing may be considered only if it can operate wholly inside outer-training partitions.
 
 ## V0.8: persistent experiment catalog and artifact verification
 
