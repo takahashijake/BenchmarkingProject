@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import platform
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -13,7 +13,7 @@ from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from benchforge._version import __version__
-from benchforge.core.config import SearchConfig, SearchModelConfig
+from benchforge.core.config import JsonScalar, SearchConfig, SearchModelConfig
 from benchforge.core.seeds import derive_seed
 from benchforge.data.identity import dataset_digest
 from benchforge.data.registry import Dataset, summarize_dataset
@@ -50,7 +50,7 @@ class StoredOuterFold(BaseModel):
     outer_validation_indices: tuple[int, ...]
     inner_plan: list[dict[str, Any]]
     estimator_seed: int
-    selected_parameters: dict[str, Any]
+    selected_parameters: dict[str, JsonScalar]
     best_inner_score: float | None
     trials: tuple[TrialRecord, ...]
     outer_result: FoldResult
@@ -181,7 +181,7 @@ class SearchWorkspace:
         if self.resume:
             if not self.path.is_dir():
                 raise ValueError("resume workspace does not exist")
-            if _read_regular_json(self.path / "workspace.json") != manifest:
+            if _sha(_read_regular_json(self.path / "workspace.json")) != _sha(manifest):
                 raise ValueError("incompatible search workspace: scientific experiment changed")
         else:
             if self.path.exists():
@@ -225,7 +225,8 @@ class SearchWorkspace:
         }:
             raise ValueError("invalid checkpoint envelope")
         if (
-            data["schema"] != SCHEMA
+            type(data["schema"]) is not int
+            or data["schema"] != SCHEMA
             or data["contract"] != CONTRACT
             or data["experiment"] != self.identity
             or data["task"] != self.tasks[key]
@@ -258,7 +259,7 @@ class SearchWorkspace:
         completed: int,
         failed: int,
         pruned: int,
-        selected: dict[str, Any],
+        selected: dict[str, JsonScalar],
         score: float | None,
         budget: int,
     ) -> None:
@@ -274,7 +275,7 @@ class SearchWorkspace:
         ):
             raise ValueError("invalid trial counts or sequence")
         if candidate.mode == "fixed":
-            if selected != candidate.parameters:
+            if _sha(selected) != _sha(candidate.parameters):
                 raise ValueError("fixed parameters changed")
             return
         space = self.spaces.resolve(candidate.name)
@@ -283,7 +284,9 @@ class SearchWorkspace:
                 raise ValueError("invalid trial state or duration")
             if set(r.proposed_parameters) & set(candidate.parameters):
                 raise ValueError("trial overwrites fixed parameters")
-            if r.parameters != {**space.defaults, **candidate.parameters, **r.proposed_parameters}:
+            if _sha(r.parameters) != _sha(
+                {**space.defaults, **candidate.parameters, **r.proposed_parameters}
+            ):
                 raise ValueError("trial parameters disagree with model configuration")
             if (r.state == "COMPLETE") != (r.value is not None):
                 raise ValueError("invalid trial objective")
@@ -300,7 +303,7 @@ class SearchWorkspace:
                 r.number,
             ),
         )[0]
-        if selected != best.parameters or score != best.value:
+        if _sha(selected) != _sha(best.parameters) or score != best.value:
             raise ValueError("selection disagrees with trial evidence")
 
     def _validate_outer(
@@ -316,7 +319,7 @@ class SearchWorkspace:
             value.fold_id != fold.fold_id
             or value.outer_train_indices != tuple(fold.train_indices)
             or value.outer_validation_indices != tuple(fold.validation_indices)
-            or value.inner_plan != fold_plan(inner)
+            or _sha(value.inner_plan) != _sha(fold_plan(inner))
             or value.estimator_seed
             != derive_seed(
                 self.config.seed, "estimator", candidate.id or candidate.name, fold.fold_id
@@ -404,8 +407,7 @@ class SearchWorkspace:
     def save_outer(
         self, candidate: SearchModelConfig, fold: Fold, value: OuterFoldSearchResult
     ) -> None:
-        payload = asdict(value)
-        payload.pop("inner_folds")
+        payload = {f.name: getattr(value, f.name) for f in fields(value) if f.name != "inner_folds"}
         payload["inner_plan"] = fold_plan(value.inner_folds)
         payload["estimator_seed"] = derive_seed(
             self.config.seed, "estimator", candidate.id or candidate.name, fold.fold_id
@@ -445,7 +447,9 @@ class SearchWorkspace:
             payload = self._load(key)
             if payload is None:
                 return None
-            if set(payload) != {"result", "plan"} or payload["plan"] != self.final_plans[key]:
+            if set(payload) != {"result", "plan"} or _sha(payload["plan"]) != _sha(
+                self.final_plans[key]
+            ):
                 raise ValueError("final checkpoint plan mismatch")
             value = _FINAL.validate_python(payload["result"])
             if _sha(_FINAL.dump_python(value, mode="json")) != _sha(payload["result"]):

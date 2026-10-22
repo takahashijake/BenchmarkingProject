@@ -671,3 +671,21 @@ def test_malformed_structured_payload_recomputed(tmp_path, mutation):
     result = runner.run_search(config, checkpoint_dir=work, resume=True, persist=False)
     assert len(result.checkpoint_invalid) == 1
     assert len(result.checkpoint_executed) == 1
+
+
+def test_boolean_schema_is_not_integer_version_one(tmp_path):
+    config = config_for(tmp_path)
+    work = tmp_path / "work"
+    runner.run_search(config, checkpoint_dir=work, persist=False)
+    path = next((work / "tasks").glob("*.json"))
+    data = json.loads(path.read_text())
+    data["schema"] = True
+    path.write_text(json.dumps(data))
+    result = runner.run_search(config, checkpoint_dir=work, resume=True, persist=False)
+    assert len(result.checkpoint_invalid) == 1
+    manifest_path = work / "workspace.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["workspace_schema"] = True
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="incompatible"):
+        runner.run_search(config, checkpoint_dir=work, resume=True, persist=False)
