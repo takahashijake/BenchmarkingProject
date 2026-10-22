@@ -288,3 +288,15 @@ demand, avoiding scientific-library startup costs for trivial supervised workers
 
 See [the architecture decision](v0.12-providers.md) and
 [provider contracts, examples and limits](providers.md).
+
+## V0.13 nested-search recovery
+
+`search.recovery` owns versioned complete family/outer-fold and final-search
+checkpoints, safe JSON validation and workspace compatibility. It reuses atomic
+byte publication from `execution.checkpoint_io`; fixed benchmark recovery keeps
+its original contract. The existing search loop loads or executes each fold,
+then uses unchanged aggregation/ranking and fitting kernels. AutoML passes its
+resolved canonical plan into this same workspace and holds its lock through
+parent sealing. Scientific artifact identity is unchanged. See [the recovery
+decision and lifecycle](v0.13-recovery.md) for rejected trial/RDB alternatives,
+timeout restrictions, validation rules and reproducibility boundaries.
