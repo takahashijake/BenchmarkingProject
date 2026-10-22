@@ -102,6 +102,12 @@ def _decode_json(path: Path) -> Any:
     def reject_constant(value: str) -> None:
         raise ArtifactError(f"non-finite JSON constant {value}")
 
+    def finite_float(value: str) -> float:
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ArtifactError(f"non-finite JSON number {value}")
+        return parsed
+
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         value: dict[str, Any] = {}
         for key, item in pairs:
@@ -114,6 +120,7 @@ def _decode_json(path: Path) -> Any:
         return json.loads(
             path.read_text(encoding="utf-8"),
             parse_constant=reject_constant,
+            parse_float=finite_float,
             object_pairs_hook=unique_object,
         )
     except (ValueError, UnicodeError) as exc:

@@ -82,6 +82,21 @@ def build_parser() -> argparse.ArgumentParser:
         "robustness", help="evaluate stability with repeated matched cross-validation"
     )
     robustness_parser.add_argument("config", help="path to a YAML robustness configuration")
+    report_parser = subparsers.add_parser(
+        "report", help="render verified artifacts as offline HTML"
+    )
+    report_parser.add_argument("directory", type=Path)
+    report_parser.add_argument("--output", required=True, type=Path)
+    report_parser.add_argument("--compare", type=Path, help="second artifact directory")
+    report_parser.add_argument(
+        "--deep", action="store_true", help="recompute stored scores offline"
+    )
+    report_parser.add_argument(
+        "--allow-legacy", action="store_true", help="permit verified historical unsealed evidence"
+    )
+    report_parser.add_argument(
+        "--overwrite", action="store_true", help="replace an existing report"
+    )
     from benchforge.providers.cli import add_commands as add_plugin_commands
 
     add_plugin_commands(subparsers)
@@ -93,6 +108,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "report":
+            from benchforge.reporting import generate_report
+
+            output = generate_report(
+                args.directory,
+                args.output,
+                compare=args.compare,
+                deep=args.deep,
+                allow_legacy=args.allow_legacy,
+                overwrite=args.overwrite,
+            )
+            print(f"Report: {output}")
+            return 0
         if args.command == "plugins":
             from benchforge.providers.cli import dispatch as dispatch_plugins
 
