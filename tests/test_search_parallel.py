@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-from contextlib import suppress
+from contextlib import closing, suppress
 
 import numpy as np
 import pytest
@@ -237,6 +237,22 @@ def test_portable_crash_isolated_and_successful_folds_recover(tmp_path, monkeypa
     assert partial.failures[0].model_identifier == "tuned"
     assert {f.model_identifier for f in partial.families} == {"fixed"}
     assert partial.leaderboard[-1].rank is None
+    from benchforge.analysis.summary import format_automl_summary, format_search_summary
+    from benchforge.automl.planner import build_automl_plan
+    from benchforge.automl.results import AutoMLResult
+
+    summary = format_search_summary(partial)
+    assert "nested search incomplete" in summary
+    assert "WorkerCrash" in summary
+    assert "Ranks compare complete families only" in summary
+    auto = AutoMLResult(
+        fingerprint="format-only",
+        plan=build_automl_plan(automl_config(tmp_path)),
+        search_result=partial,
+        total_duration_seconds=0.0,
+    )
+    assert "AutoML incomplete" in format_automl_summary(auto)
+    assert "WorkerCrash" in format_automl_summary(auto)
     assert len(list((work / "tasks").glob("*.json"))) == 4  # 3 outer + fixed final
     assert verify(partial.artifact_directory, deep=True).passed
     monkeypatch.undo()
@@ -578,6 +594,27 @@ def test_portable_supervisor_uses_direct_process_cleanup_without_posix_groups(
         )
     )
     assert sorted(o.reason or "success" for o in outcomes) == ["WorkerCrash", "success"]
+    original = supervisor.subprocess.Popen
+    processes = []
+
+    def tracked(*args, **kwargs):
+        process = original(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(supervisor.subprocess, "Popen", tracked)
+    with closing(
+        supervisor.supervise(
+            job,
+            [("block", str(tmp_path)), ("fast", str(tmp_path))],
+            workers=2,
+            options=ExecutionOptions(),
+            deadline=None,
+        )
+    ) as pending:
+        assert next(pending).result == "fast"
+        assert any(p.poll() is None for p in processes)
+    assert all(p.poll() is not None for p in processes)
     with pytest.raises(ValueError, match="POSIX"):
         ExecutionOptions(candidate_timeout=1)
 

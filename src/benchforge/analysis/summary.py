@@ -112,14 +112,21 @@ def format_search_summary(result: SearchResult) -> str:
         )
     failures = ""
     if result.failures:
-        failures = "\nFamily failures:\n" + "\n".join(
+        failures = (
+            "\nRanks compare complete families only; failed families have no complete-CV estimate."
+            "\nFamily failures:\n"
+        ) + "\n".join(
             f"  {failure.model_identifier}: {failure.error_type}: {failure.message}"
             for failure in result.failures
         )
     artifact = str(result.artifact_directory) if result.artifact_directory else "not persisted"
     return (
-        "BenchForge nested search complete\n"
-        f"Dataset: {result.dataset.identity}\n"
+        (
+            "BenchForge nested search incomplete\n"
+            if result.failures
+            else "BenchForge nested search complete\n"
+        )
+        + f"Dataset: {result.dataset.identity}\n"
         f"Outer folds: {result.outer_fold_count}\n"
         f"Inner folds: {result.inner_fold_count}\n"
         f"Optimization metric: {spec.display_name} "
@@ -183,9 +190,18 @@ def format_automl_summary(result: AutoMLResult) -> str:
             f"{search.final_candidate.parameters}"
         )
     artifact = str(result.artifact_directory) if result.artifact_directory else "not persisted"
+    failures = ""
+    if search.failures:
+        failures = (
+            "\nRanks compare complete families only; failed families have no complete-CV estimate."
+            "\nFamily failures:\n"
+        ) + "\n".join(
+            f"  {failure.model_identifier}: {failure.error_type}: {failure.message}"
+            for failure in search.failures
+        )
     return (
-        "BenchForge AutoML complete\n"
-        f"Dataset: {search.dataset.identity}\n"
+        ("BenchForge AutoML incomplete\n" if search.failures else "BenchForge AutoML complete\n")
+        + f"Dataset: {search.dataset.identity}\n"
         f"Task: {search.dataset.task.value}\n"
         f"Searchable families: {', '.join(result.plan.searchable_families)}\n"
         f"Fixed candidates: {', '.join(result.plan.fixed_families) or 'none'}\n"
@@ -199,5 +215,5 @@ def format_automl_summary(result: AutoMLResult) -> str:
         f"Total duration: {result.total_duration_seconds:.3f}s\n"
         f"AutoML fingerprint: {result.fingerprint}\n"
         f"Search fingerprint: {search.fingerprint}\n"
-        f"Artifacts: {artifact}"
+        f"Artifacts: {artifact}" + failures
     )
