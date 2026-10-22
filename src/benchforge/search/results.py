@@ -119,3 +119,6 @@ class SearchResult:
     artifact_directory: Path | None = None
     search_space_identity: dict[str, Any] = field(default_factory=dict)
     provider_manifests: tuple[ProviderManifest, ...] = ()
+    checkpoint_reused: tuple[str, ...] = ()
+    checkpoint_executed: tuple[str, ...] = ()
+    checkpoint_invalid: tuple[str, ...] = ()

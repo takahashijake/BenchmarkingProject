@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import replace
+from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 import optuna
 
@@ -22,6 +25,7 @@ from benchforge.data.registry import (
 from benchforge.evaluation.metrics import aggregate_fold_metrics
 from benchforge.execution.runner import FoldExecutionError, execute_fold, run_benchmark
 from benchforge.models.registry import ModelRegistry, default_model_registry
+from benchforge.search.recovery import SearchWorkspace
 from benchforge.search.registry import SearchSpaceRegistry, default_search_space_registry
 from benchforge.search.results import (
     FamilySearchFailure,
@@ -188,6 +192,7 @@ def _search_family(
     *,
     model_registry: ModelRegistry,
     search_space_registry: SearchSpaceRegistry,
+    workspace: SearchWorkspace | None = None,
 ) -> FamilySearchResult:
     started = perf_counter()
     identifier = candidate.id or candidate.name
@@ -199,6 +204,10 @@ def _search_family(
     fold_results: list[OuterFoldSearchResult] = []
 
     for outer_fold in outer_folds:
+        recovered = workspace.load_outer(candidate, outer_fold) if workspace else None
+        if recovered is not None:
+            fold_results.append(recovered)
+            continue
         fold_started = perf_counter()
         estimator_seed = derive_seed(config.seed, "estimator", identifier, outer_fold.fold_id)
         if space is not None:
@@ -262,6 +271,8 @@ def _search_family(
                 sampler_seed=sampler_seed,
             )
         )
+        if workspace is not None:
+            workspace.save_outer(candidate, outer_fold, fold_results[-1])
 
     all_predictions = tuple(
         sorted(
@@ -408,7 +419,7 @@ def _final_search(
     )
 
 
-def run_search(
+def _run_search(
     config: SearchConfig,
     *,
     dataset_registry: DatasetRegistry = default_dataset_registry,
@@ -416,6 +427,10 @@ def run_search(
     search_space_registry: SearchSpaceRegistry = default_search_space_registry,
     persist: bool = True,
     dataset: Dataset | None = None,
+    checkpoint_dir: Path | None = None,
+    resume: bool = False,
+    _orchestration: dict[str, Any] | None = None,
+    _stack: ExitStack,
 ) -> SearchResult:
     """Tune families inside outer training partitions and rank outer-fold evidence only."""
     from benchforge.providers.runtime import activate
@@ -431,6 +446,26 @@ def run_search(
         if search_space_registry not in (default_search_space_registry, provider_runtime.spaces):
             raise ValueError("cannot combine providers with custom search-space registries")
         search_space_registry = provider_runtime.spaces
+
+    if resume and checkpoint_dir is None:
+        raise ValueError("resume requires checkpoint_dir")
+    if checkpoint_dir is not None:
+        if (
+            config.budget.timeout_seconds_per_outer_fold is not None
+            or config.final_search.timeout_seconds is not None
+        ):
+            raise ValueError("search recovery requires trial budgets without wall-clock timeouts")
+        allowed_models = provider_runtime.models if provider_runtime else default_model_registry
+        allowed_spaces = (
+            provider_runtime.spaces if provider_runtime else default_search_space_registry
+        )
+        allowed_data = provider_runtime.datasets if provider_runtime else default_dataset_registry
+        if (
+            model_registry is not allowed_models
+            or search_space_registry is not allowed_spaces
+            or dataset_registry is not allowed_data
+        ):
+            raise ValueError("recovery requires built-in registries or version-pinned providers")
 
     started = perf_counter()
     dataset = dataset or dataset_registry.resolve(config.dataset)
@@ -452,6 +487,21 @@ def run_search(
         )
         for outer in outer_folds
     }
+    workspace = None
+    if checkpoint_dir is not None:
+        workspace = _stack.enter_context(
+            SearchWorkspace(
+                checkpoint_dir,
+                config,
+                dataset,
+                outer_folds,
+                inner_folds,
+                search_space_registry,
+                model_registry.identity_for({m.name for m in config.models}),
+                resume=resume,
+                orchestration=_orchestration,
+            )
+        )
     families: list[FamilySearchResult] = []
     failures: list[FamilySearchFailure] = []
     for candidate in config.models:
@@ -466,6 +516,7 @@ def run_search(
                     inner_folds,
                     model_registry=model_registry,
                     search_space_registry=search_space_registry,
+                    workspace=workspace,
                 )
             )
         except (ValueError, FoldExecutionError, FamilySearchError) as exc:
@@ -496,17 +547,19 @@ def run_search(
         raise FamilySearchError(f"every search family failed: {details}")
     top_identifier = successful[0].model_identifier
     top_family = next(family for family in families if family.model_identifier == top_identifier)
-    final_candidate = (
-        _final_search(
-            config,
-            top_family,
-            dataset,
-            model_registry=model_registry,
-            search_space_registry=search_space_registry,
-        )
-        if config.final_search.enabled
-        else None
-    )
+    final_candidate = None
+    if config.final_search.enabled:
+        final_candidate = workspace.load_final(top_family.candidate) if workspace else None
+        if final_candidate is None:
+            final_candidate = _final_search(
+                config,
+                top_family,
+                dataset,
+                model_registry=model_registry,
+                search_space_registry=search_space_registry,
+            )
+            if workspace is not None:
+                workspace.save_final(top_family.candidate, final_candidate)
     result = SearchResult(
         provider_manifests=config.provider_manifests,
         fingerprint=fingerprint,
@@ -522,6 +575,9 @@ def run_search(
         leaderboard=leaderboard,
         final_candidate=final_candidate,
         total_duration_seconds=perf_counter() - started,
+        checkpoint_reused=tuple(workspace.reused) if workspace else (),
+        checkpoint_executed=tuple(workspace.executed) if workspace else (),
+        checkpoint_invalid=tuple(workspace.invalid) if workspace else (),
     )
     if persist:
         from benchforge.storage.search import SearchArtifactStore
@@ -529,3 +585,33 @@ def run_search(
         directory = SearchArtifactStore(config.output.directory).write(config, result)
         result = replace(result, artifact_directory=directory)
     return result
+
+
+def run_search(
+    config: SearchConfig,
+    *,
+    dataset_registry: DatasetRegistry = default_dataset_registry,
+    model_registry: ModelRegistry = default_model_registry,
+    search_space_registry: SearchSpaceRegistry = default_search_space_registry,
+    persist: bool = True,
+    dataset: Dataset | None = None,
+    checkpoint_dir: Path | None = None,
+    resume: bool = False,
+) -> SearchResult:
+    """Run nested search; optionally create or resume a complete-fold workspace.
+
+    An interrupted study is recomputed. Recovery rejects wall-clock study limits
+    and unversioned custom registries. The workspace lock spans artifact sealing.
+    """
+    with ExitStack() as stack:
+        return _run_search(
+            config,
+            dataset_registry=dataset_registry,
+            model_registry=model_registry,
+            search_space_registry=search_space_registry,
+            persist=persist,
+            dataset=dataset,
+            checkpoint_dir=checkpoint_dir,
+            resume=resume,
+            _stack=stack,
+        )

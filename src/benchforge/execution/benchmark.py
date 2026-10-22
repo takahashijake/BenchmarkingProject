@@ -17,7 +17,8 @@ from benchforge.data.registry import (
     summarize_dataset,
 )
 from benchforge.evaluation.metrics import AggregateMetric
-from benchforge.execution.checkpoints import CheckpointWorkspace, _write_atomic
+from benchforge.execution.checkpoint_io import _write_atomic
+from benchforge.execution.checkpoints import CheckpointWorkspace
 from benchforge.execution.runner import RunResult, run_benchmark
 from benchforge.execution.supervisor import ExecutionOptions, supervise
 from benchforge.models.registry import ModelRegistry, default_model_registry

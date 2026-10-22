@@ -6,12 +6,8 @@ They contain only recomputable results, never executable/pickled model state.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -24,8 +20,8 @@ from benchforge.core.config import BenchmarkConfig, ModelConfig
 from benchforge.data.identity import dataset_digest as _dataset_digest
 from benchforge.data.registry import Dataset
 from benchforge.evaluation.metrics import aggregate_fold_metrics
+from benchforge.execution.checkpoint_io import _read_regular_json, _sha, _write_atomic
 from benchforge.execution.runner import RunResult
-from benchforge.providers.json import unique_object
 from benchforge.splits.stratified import Fold
 
 if TYPE_CHECKING:
@@ -35,16 +31,6 @@ if TYPE_CHECKING:
 WORKSPACE_SCHEMA = 1
 EXECUTION_CONTRACT = "fixed-benchmark-candidate-v1"
 _RUN_ADAPTER: TypeAdapter[RunResult] = TypeAdapter(RunResult)
-
-
-def _canonical(value: Any) -> bytes:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("utf-8")
-
-
-def _sha(value: Any) -> str:
-    return hashlib.sha256(_canonical(value)).hexdigest()
 
 
 def experiment_identity(
@@ -69,37 +55,6 @@ def experiment_identity(
         "numpy": np.__version__,
         "pandas": pd.__version__,
     })
-
-
-def _write_atomic(path: Path, value: Any) -> None:
-    """Publish fully flushed bytes via same-directory rename, never partial JSON."""
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", prefix=f".{path.name}.", suffix=".tmp",
-            dir=path.parent, delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(_canonical(value) + b"\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        temporary = None
-        if hasattr(os, "O_DIRECTORY"):
-            fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
-
-def _read_regular_json(path: Path) -> Any:
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f"unsafe or missing checkpoint file: {path}")
-    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
 
 
 class CheckpointWorkspace:
