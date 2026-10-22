@@ -35,3 +35,4 @@ jobs:
           cache: pip
       - run: python -m pip install -e '.[dev]' ./examples/provider
       - run: python -m pytest -q tests/test_search_parallel.py -k portable
+      - run: python -m pytest -q tests/test_reporting.py
