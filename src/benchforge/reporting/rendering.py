@@ -27,12 +27,14 @@ nav { display: flex; flex-wrap: wrap; gap: 1rem; } a { color: #164d83; }
  border: 1px solid #69809a; border-radius: .3rem; }
 dl { display: grid; grid-template-columns: minmax(8rem, 1fr) 4fr; gap: .4rem 1rem; }
 dt { font-weight: 700; } dd { margin: 0; overflow-wrap: anywhere; }
-.scroll { overflow-x: auto; } table { border-collapse: collapse; width: 100%; font-size: .94rem; }
+.scroll { overflow-x: auto; } table { border-collapse: collapse; width: 100%; min-width: 52rem;
+ font-size: .94rem; }
 caption { text-align: left; font-weight: 600; margin: .6rem 0; }
 th, td { text-align: left; vertical-align: top; padding: .65rem;
- border-bottom: 1px solid #d6dfe8; overflow-wrap: anywhere; }
+ border-bottom: 1px solid #d6dfe8; overflow-wrap: anywhere; min-width: 7rem; }
 thead { background: #edf2f8; } tbody th { font-weight: 600; }
-.num { font-variant-numeric: tabular-nums; } pre { white-space: pre-wrap; overflow-wrap: anywhere;
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere;
  padding: 1rem; background: #f4f6f9; border: 1px solid #d6dfe8; font-size: .88rem; }
 details { margin: .8rem 0; } summary { cursor: pointer; font-weight: 600; }
 small { display: block; color: #42536b; } meter { width: 6rem; display: block; }
