@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — v0.15 verification-gated reporting
+
+- Add an immutable public reporting model and adapters for all five persisted workflows.
+- Generate deterministic, offline HTML with accessible tables and embedded CSS, without training.
+- Preserve outer evaluation, inner/final selection, partial failures and exact robustness evidence.
+- Gate reports on existing verification, support deep checks and require explicit legacy opt-in.
+- Compare directories without a catalog; disclose compatibility and withhold insufficiently supported deltas.
+- Escape metadata, reject unsafe destinations and publish atomically with explicit overwrite.
+- Reject overflowing nonfinite JSON numbers at the existing verification decoder boundary.
+- Add scientific, security, CLI and packaging regressions, Windows reporting checks and six examples.
+- Preserve package/evaluator version 0.8.0, scientific identities and persisted schemas.
+
 ## Unreleased — v0.14 parallel search and AutoML
 
 - Add bounded process execution with `--workers N` and Python `workers=N` (default 1).

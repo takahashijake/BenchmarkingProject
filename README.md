@@ -18,6 +18,29 @@ five workflow levels:
 AutoML is compute-aware orchestration over the existing search layer, not automatic pipeline
 invention.
 
+## Offline experiment reports (v0.15)
+
+Turn existing verified artifacts into self-contained HTML, with no training,
+provider activation, JavaScript or network access:
+
+```bash
+benchforge report /path/to/experiment --output /tmp/report.html --deep
+benchforge report /path/to/A --compare /path/to/B --output /tmp/comparison.html --deep
+python -m webbrowser /tmp/report.html
+```
+
+All five workflows and all three tasks are supported. Reports preserve outer
+versus inner selection evidence, failures, repetition statistics and provenance.
+Comparison needs no catalog and withholds deltas for partial/incompatible evidence.
+Output must be outside artifact/recovery trees; existing reports require
+`--overwrite`. Historical unsealed evidence requires `--allow-legacy`; this never
+waives missing modern seals or corruption.
+
+Python: `from benchforge.reporting import generate_report, load_report`.
+See [architecture, API, security, limitations and six examples](docs/v0.15-reporting.md)
+and [actual validation](docs/v0.15-validation.md). For a small complete demo:
+`python examples/reporting/demo.py --output-dir /tmp/benchforge-reporting-demo`.
+
 ## Versioned providers (v0.12)
 
 Install and explicitly activate third-party datasets, sklearn estimators, metrics

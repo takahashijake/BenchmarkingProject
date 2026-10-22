@@ -320,3 +320,21 @@ POSIX process groups retain the fixed-benchmark lifecycle; Windows unbudgeted
 subprocesses promise only direct-worker cleanup. See
 [the decision, restrictions and lifecycle](v0.14-parallel-search.md) and
 [validation evidence](v0.14-validation.md).
+
+
+## V0.15 reporting boundary
+
+`reporting.loading` verifies existing artifacts, reuses normalized descriptors and
+strict JSON decoding, then adapts selected evidence into frozen dataclasses and
+immutable JSON snapshots. `reporting.rendering` is a pure deterministic HTML
+presentation with inline CSS and no script or network resources.
+`reporting.publication` validates paths and stages/fsyncs outside evidence before
+atomic publication, with no-clobber by default. The CLI delegates to this public
+API. No execution, scoring, preprocessing, identity or persistence kernel changes.
+
+Directory comparison calls the existing pure `catalog.compare_descriptors()`
+without a database and adds conservative presentation restrictions for omitted
+preprocessing/dependency evidence. Partial or incompatible comparisons withhold
+deltas. Robustness interpretation reuses existing analysis; search leaderboards
+use only stored outer results. Standard/deep verification and sealed/unsealed
+status stay explicit. See [reporting design, usage and limits](v0.15-reporting.md).
