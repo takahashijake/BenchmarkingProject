@@ -41,6 +41,24 @@ Offline verification never imports them and reports custom metric recomputation
 as unavailable. Feature milestone numbers do not change the historical 0.8.0
 package/evaluator version in this implementation.
 
+## Durable nested search and AutoML (v0.13)
+
+Nested search and AutoML can recover verified completed family/outer-fold tasks.
+An interrupted inner study restarts; completed folds and final selection are reused.
+Recovery uses separate locked workspaces and preserves ordinary sealed artifacts.
+
+```bash
+benchforge search configs/examples/breast_cancer_search.yaml --workspace artifacts/recovery/search
+benchforge search configs/examples/breast_cancer_search.yaml --resume artifacts/recovery/search
+benchforge automl configs/examples/breast_cancer_automl.yaml --workspace artifacts/recovery/automl
+benchforge automl configs/examples/breast_cancer_automl.yaml --resume artifacts/recovery/automl
+```
+
+Python: pass `checkpoint_dir=Path(...)` and then `resume=True` to `run_search()` or
+`run_automl()`. Recovery requires trial-count budgets without study timeouts and
+built-in registries or explicitly pinned providers. See [v0.13 recovery](docs/v0.13-recovery.md)
+for binary, multiclass, regression examples, compatibility rules and limitations.
+
 ## Durable benchmark resume (v0.10)
 
 Long-running fixed benchmarks can now reuse verified completed candidates after an interruption.

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — v0.13 durable search and AutoML
+
+- Add opt-in `--workspace`/`--resume` and Python `checkpoint_dir`/`resume` interfaces.
+- Recover validated complete family/outer-fold and final-search tasks through ordinary search.
+- Bind recovery to resolved data, exact fold plans, scientific contracts, dependencies and AutoML plans.
+- Reuse shared atomic JSON publication with OS locks, integrity checks and semantic validation.
+- Support serial pinned providers; reject timeout-enabled recovery and unversioned registries.
+- Preserve historical fingerprints, artifact schemas, fixed-benchmark behavior and catalog identities.
+- Add real process-kill, scientific-equivalence, corruption, concurrency and identity-drift regressions.
+
 ## Unreleased — v0.12 versioned providers
 
 - Add explicit, version-pinned installed providers for datasets, estimators, metrics and search spaces.
